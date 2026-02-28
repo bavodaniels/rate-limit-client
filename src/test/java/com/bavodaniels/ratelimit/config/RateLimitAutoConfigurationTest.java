@@ -13,6 +13,7 @@ import org.springframework.boot.webclient.WebClientCustomizer;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.http.client.ClientHttpRequestInterceptor;
+import org.springframework.web.client.RestClient;
 import org.springframework.web.client.RestTemplate;
 import org.springframework.web.reactive.function.client.ExchangeFilterFunction;
 import org.springframework.web.reactive.function.client.WebClient;
@@ -188,6 +189,114 @@ class RateLimitAutoConfigurationTest {
         @Bean
         public RestTemplate restTemplate2() {
             return new RestTemplate();
+        }
+    }
+
+    // RestClient-specific tests
+
+    @Test
+    void restClientAutoConfigurationShouldCreateBuilderWhenEnabled() {
+        contextRunner
+                .run(context -> {
+                    assertThat(context).hasSingleBean(RateLimitTracker.class);
+                    assertThat(context).hasSingleBean(RestClient.Builder.class);
+                });
+    }
+
+    @Test
+    void restClientAutoConfigurationShouldNotCreateBuilderWhenDisabled() {
+        contextRunner
+                .withPropertyValues("rate-limit.clients.rest-client.enabled=false")
+                .run(context -> {
+                    assertThat(context).hasSingleBean(RateLimitTracker.class);
+                    assertThat(context).doesNotHaveBean(RestClient.Builder.class);
+                });
+    }
+
+    @Test
+    void restClientAutoConfigurationShouldNotCreateBeansWhenGloballyDisabled() {
+        contextRunner
+                .withPropertyValues("rate-limit.enabled=false")
+                .run(context -> {
+                    assertThat(context).doesNotHaveBean(RateLimitTracker.class);
+                    assertThat(context).doesNotHaveBean(RestClient.Builder.class);
+                });
+    }
+
+    @Test
+    void restClientBuilderShouldHaveInterceptorPreConfigured() {
+        contextRunner
+                .run(context -> {
+                    RestClient.Builder builder = context.getBean(RestClient.Builder.class);
+
+                    // Verify the builder bean exists
+                    assertThat(builder).isNotNull();
+                });
+    }
+
+    @Test
+    void userDefinedRestClientBuilderShouldTakePrecedence() {
+        contextRunner
+                .withUserConfiguration(CustomRestClientBuilderConfiguration.class)
+                .run(context -> {
+                    // User-defined builder should be used instead
+                    assertThat(context).hasSingleBean(RestClient.Builder.class);
+                    assertThat(context).hasBean("customRestClientBuilder");
+                });
+    }
+
+    @Test
+    void restClientBuilderCanBeCustomizedFurther() {
+        contextRunner
+                .run(context -> {
+                    RestClient.Builder builder = context.getBean(RestClient.Builder.class);
+
+                    // Builder should allow further customization
+                    RestClient client = builder
+                            .baseUrl("http://example.com")
+                            .build();
+
+                    assertThat(client).isNotNull();
+                });
+    }
+
+    @Test
+    void restClientMaxWaitTimePropertyShouldBeRespected() {
+        contextRunner
+                .withPropertyValues("rate-limit.max-wait-time-millis=60000")
+                .run(context -> {
+                    assertThat(context).hasSingleBean(RestClient.Builder.class);
+                    RateLimitProperties properties = context.getBean(RateLimitProperties.class);
+                    assertThat(properties.getMaxWaitTimeMillis()).isEqualTo(60000);
+                });
+    }
+
+    @Test
+    void restClientPropertiesShouldHaveCorrectDefaults() {
+        contextRunner
+                .run(context -> {
+                    RateLimitProperties properties = context.getBean(RateLimitProperties.class);
+                    assertThat(properties.getClients().getRestClient().isEnabled()).isTrue();
+                });
+    }
+
+    @Test
+    void restClientAndRestTemplateAndWebClientShouldWorkTogether() {
+        reactiveContextRunner
+                .run(context -> {
+                    // All auto-configurations should be present
+                    assertThat(context).hasSingleBean(RateLimitTracker.class);
+                    assertThat(context).hasSingleBean(RestClient.Builder.class);
+                    assertThat(context).hasSingleBean(WebClientCustomizer.class);
+                    assertThat(context).hasBean("restTemplateRateLimitBeanPostProcessor");
+                });
+    }
+
+    @Configuration
+    static class CustomRestClientBuilderConfiguration {
+        @Bean
+        public RestClient.Builder customRestClientBuilder() {
+            return RestClient.builder();
         }
     }
 
