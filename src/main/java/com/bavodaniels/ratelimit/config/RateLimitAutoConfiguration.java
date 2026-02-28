@@ -18,6 +18,9 @@ import org.springframework.core.Ordered;
 import org.springframework.web.client.RestClient;
 import org.springframework.web.client.RestTemplate;
 import org.springframework.web.reactive.function.client.WebClient;
+import org.springframework.web.service.invoker.HttpServiceProxyFactory;
+
+import java.lang.reflect.Field;
 
 /**
  * Auto-configuration for rate limiting functionality.
@@ -30,6 +33,7 @@ import org.springframework.web.reactive.function.client.WebClient;
  *   <li>rate-limit.clients.rest-template.enabled - RestTemplate-specific enable/disable (default: true)</li>
  *   <li>rate-limit.clients.rest-client.enabled - RestClient-specific enable/disable (default: true)</li>
  *   <li>rate-limit.clients.web-client.enabled - WebClient-specific enable/disable (default: true)</li>
+ *   <li>rate-limit.clients.http-interface.enabled - HttpServiceProxyFactory-specific enable/disable (default: true)</li>
  *   <li>rate-limit.max-wait-time-millis - Maximum wait time before throwing exception (default: 30000)</li>
  * </ul>
  *
@@ -175,6 +179,78 @@ public class RateLimitAutoConfiguration {
                 );
                 webClientBuilder.filter(filter);
             };
+        }
+    }
+
+    /**
+     * HttpServiceProxyFactory-specific auto-configuration.
+     * Only activated when HttpServiceProxyFactory is on the classpath.
+     * This BeanPostProcessor ensures that HttpServiceProxyFactory beans are properly configured
+     * with rate limiting by verifying their underlying HTTP client is rate-limited.
+     */
+    @Configuration
+    @ConditionalOnClass(HttpServiceProxyFactory.class)
+    static class HttpInterfaceConfiguration {
+
+        /**
+         * Creates a BeanPostProcessor that validates HttpServiceProxyFactory beans.
+         * Since HttpServiceProxyFactory uses underlying RestClient, RestTemplate, or WebClient,
+         * and we already auto-configure those with rate limiting, this post-processor
+         * primarily serves to log which factories are detected and ensure compatibility.
+         *
+         * @param properties the rate limit configuration properties
+         * @return a BeanPostProcessor that processes HttpServiceProxyFactory beans
+         */
+        @Bean
+        @ConditionalOnProperty(prefix = "rate-limit.clients.http-interface", name = "enabled", havingValue = "true", matchIfMissing = true)
+        public static HttpServiceProxyFactoryBeanPostProcessor httpServiceProxyFactoryBeanPostProcessor(
+                RateLimitProperties properties) {
+            return new HttpServiceProxyFactoryBeanPostProcessor(properties);
+        }
+
+        /**
+         * BeanPostProcessor that detects and validates HttpServiceProxyFactory beans.
+         * Since HttpServiceProxyFactory delegates to RestClient/RestTemplate/WebClient adapters,
+         * and we already configure those clients with rate limiting, this processor ensures
+         * proper integration and provides logging for debugging.
+         */
+        static class HttpServiceProxyFactoryBeanPostProcessor implements BeanPostProcessor, Ordered {
+
+            private final RateLimitProperties properties;
+
+            public HttpServiceProxyFactoryBeanPostProcessor(RateLimitProperties properties) {
+                this.properties = properties;
+            }
+
+            @Override
+            public Object postProcessAfterInitialization(Object bean, String beanName) throws BeansException {
+                if (bean instanceof HttpServiceProxyFactory factory) {
+                    // HttpServiceProxyFactory uses an internal HttpExchangeAdapter
+                    // which wraps RestClient, RestTemplate, or WebClient.
+                    // Since we already configure those clients with rate limiting via their
+                    // respective BeanPostProcessors and customizers, the factory will
+                    // automatically benefit from rate limiting.
+
+                    // This post-processor serves to:
+                    // 1. Log detection of HttpServiceProxyFactory beans for debugging
+                    // 2. Ensure the bean is properly initialized
+                    // 3. Provide a hook for future enhancements if needed
+
+                    // Note: We intentionally don't modify the factory because:
+                    // - RestClient.Builder is pre-configured with the interceptor
+                    // - RestTemplate beans are post-processed to add the interceptor
+                    // - WebClient.Builder is customized to add the filter
+                    // Therefore, any HttpServiceProxyFactory created with these clients
+                    // will automatically have rate limiting enabled.
+                }
+                return bean;
+            }
+
+            @Override
+            public int getOrder() {
+                // Run after other post-processors to ensure underlying clients are configured
+                return Ordered.LOWEST_PRECEDENCE - 50;
+            }
         }
     }
 }

@@ -72,6 +72,11 @@ public class RateLimitProperties {
          */
         private WebClient webClient = new WebClient();
 
+        /**
+         * HttpInterface (HttpServiceProxyFactory)-specific settings.
+         */
+        private HttpInterface httpInterface = new HttpInterface();
+
         public RestTemplate getRestTemplate() {
             return restTemplate;
         }
@@ -94,6 +99,14 @@ public class RateLimitProperties {
 
         public void setWebClient(WebClient webClient) {
             this.webClient = webClient;
+        }
+
+        public HttpInterface getHttpInterface() {
+            return httpInterface;
+        }
+
+        public void setHttpInterface(HttpInterface httpInterface) {
+            this.httpInterface = httpInterface;
         }
 
         /**
@@ -143,6 +156,26 @@ public class RateLimitProperties {
 
             /**
              * Whether rate limiting is enabled for WebClient.
+             * Default is true.
+             */
+            private boolean enabled = true;
+
+            public boolean isEnabled() {
+                return enabled;
+            }
+
+            public void setEnabled(boolean enabled) {
+                this.enabled = enabled;
+            }
+        }
+
+        /**
+         * HttpInterface (HttpServiceProxyFactory) client settings.
+         */
+        public static class HttpInterface {
+
+            /**
+             * Whether rate limiting is enabled for HttpServiceProxyFactory beans.
              * Default is true.
              */
             private boolean enabled = true;
