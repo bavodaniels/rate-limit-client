@@ -107,7 +107,7 @@ class RateLimitAutoConfigurationTest {
     @Test
     void maxWaitTimePropertyShouldBeRespected() {
         contextRunner
-                .withPropertyValues("rate-limit.max-wait-time-millis=60000")
+                .withPropertyValues("rate-limit.max-wait-seconds=60")
                 .withUserConfiguration(SingleRestTemplateConfiguration.class)
                 .run(context -> {
                     RestTemplate restTemplate = context.getBean(RestTemplate.class);
@@ -125,7 +125,7 @@ class RateLimitAutoConfigurationTest {
                     RateLimitProperties properties = context.getBean(RateLimitProperties.class);
 
                     assertThat(properties.isEnabled()).isTrue();
-                    assertThat(properties.getMaxWaitTimeMillis()).isEqualTo(30000);
+                    assertThat(properties.getMaxWaitSeconds()).isEqualTo(5);
                     assertThat(properties.getClients().getRestTemplate().isEnabled()).isTrue();
                     assertThat(properties.getClients().getWebClient().isEnabled()).isTrue();
                 });
@@ -263,11 +263,11 @@ class RateLimitAutoConfigurationTest {
     @Test
     void restClientMaxWaitTimePropertyShouldBeRespected() {
         contextRunner
-                .withPropertyValues("rate-limit.max-wait-time-millis=60000")
+                .withPropertyValues("rate-limit.max-wait-seconds=60")
                 .run(context -> {
                     assertThat(context).hasSingleBean(RestClient.Builder.class);
                     RateLimitProperties properties = context.getBean(RateLimitProperties.class);
-                    assertThat(properties.getMaxWaitTimeMillis()).isEqualTo(60000);
+                    assertThat(properties.getMaxWaitSeconds()).isEqualTo(60);
                 });
     }
 
@@ -372,11 +372,11 @@ class RateLimitAutoConfigurationTest {
     @Test
     void webClientMaxWaitTimePropertyShouldBeRespected() {
         reactiveContextRunner
-                .withPropertyValues("rate-limit.max-wait-time-millis=60000")
+                .withPropertyValues("rate-limit.max-wait-seconds=60")
                 .run(context -> {
                     assertThat(context).hasSingleBean(WebClientCustomizer.class);
                     RateLimitProperties properties = context.getBean(RateLimitProperties.class);
-                    assertThat(properties.getMaxWaitTimeMillis()).isEqualTo(60000);
+                    assertThat(properties.getMaxWaitSeconds()).isEqualTo(60);
                 });
     }
 
