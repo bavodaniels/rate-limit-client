@@ -15,18 +15,20 @@ import org.springframework.boot.webclient.WebClientCustomizer;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.core.Ordered;
+import org.springframework.web.client.RestClient;
 import org.springframework.web.client.RestTemplate;
 import org.springframework.web.reactive.function.client.WebClient;
 
 /**
  * Auto-configuration for rate limiting functionality.
  * This configuration automatically sets up rate limit tracking and interceptors
- * for RestTemplate and WebClient beans when the necessary classes are on the classpath.
+ * for RestTemplate, RestClient, and WebClient beans when the necessary classes are on the classpath.
  *
  * <p>Can be controlled via properties:
  * <ul>
  *   <li>rate-limit.enabled - Global enable/disable (default: true)</li>
  *   <li>rate-limit.clients.rest-template.enabled - RestTemplate-specific enable/disable (default: true)</li>
+ *   <li>rate-limit.clients.rest-client.enabled - RestClient-specific enable/disable (default: true)</li>
  *   <li>rate-limit.clients.web-client.enabled - WebClient-specific enable/disable (default: true)</li>
  *   <li>rate-limit.max-wait-time-millis - Maximum wait time before throwing exception (default: 30000)</li>
  * </ul>
@@ -109,6 +111,37 @@ public class RateLimitAutoConfiguration {
                 // Run after most other post-processors but before user-defined ones
                 return Ordered.LOWEST_PRECEDENCE - 100;
             }
+        }
+    }
+
+    /**
+     * RestClient-specific auto-configuration.
+     * Only activated when RestClient is on the classpath.
+     */
+    @Configuration
+    @ConditionalOnClass(RestClient.class)
+    static class RestClientConfiguration {
+
+        /**
+         * Creates a RestClient.Builder bean with the rate limit interceptor pre-configured.
+         * Only creates the bean if no user-defined RestClient.Builder exists.
+         * Users can still customize this builder further or define their own.
+         *
+         * @param rateLimitTracker the tracker to use for rate limiting
+         * @param properties the rate limit configuration properties
+         * @return a RestClient.Builder with rate limit interceptor
+         */
+        @Bean
+        @ConditionalOnMissingBean
+        @ConditionalOnProperty(prefix = "rate-limit.clients.rest-client", name = "enabled", havingValue = "true", matchIfMissing = true)
+        public RestClient.Builder restClientBuilder(
+                RateLimitTracker rateLimitTracker,
+                RateLimitProperties properties) {
+            RestTemplateRateLimitInterceptor interceptor = new RestTemplateRateLimitInterceptor(
+                    rateLimitTracker,
+                    properties.getMaxWaitTimeMillis()
+            );
+            return RestClient.builder().requestInterceptor(interceptor);
         }
     }
 

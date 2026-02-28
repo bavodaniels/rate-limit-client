@@ -63,6 +63,11 @@ public class RateLimitProperties {
         private RestTemplate restTemplate = new RestTemplate();
 
         /**
+         * RestClient-specific settings.
+         */
+        private RestClient restClient = new RestClient();
+
+        /**
          * WebClient-specific settings.
          */
         private WebClient webClient = new WebClient();
@@ -73,6 +78,14 @@ public class RateLimitProperties {
 
         public void setRestTemplate(RestTemplate restTemplate) {
             this.restTemplate = restTemplate;
+        }
+
+        public RestClient getRestClient() {
+            return restClient;
+        }
+
+        public void setRestClient(RestClient restClient) {
+            this.restClient = restClient;
         }
 
         public WebClient getWebClient() {
@@ -90,6 +103,26 @@ public class RateLimitProperties {
 
             /**
              * Whether rate limiting is enabled for RestTemplate.
+             * Default is true.
+             */
+            private boolean enabled = true;
+
+            public boolean isEnabled() {
+                return enabled;
+            }
+
+            public void setEnabled(boolean enabled) {
+                this.enabled = enabled;
+            }
+        }
+
+        /**
+         * RestClient client settings.
+         */
+        public static class RestClient {
+
+            /**
+             * Whether rate limiting is enabled for RestClient.
              * Default is true.
              */
             private boolean enabled = true;
