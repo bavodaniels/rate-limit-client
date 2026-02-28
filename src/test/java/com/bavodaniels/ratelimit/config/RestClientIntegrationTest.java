@@ -104,12 +104,12 @@ class RestClientIntegrationTest {
     @Test
     void restClientBuilderShouldRespectMaxWaitTimeProperty() {
         contextRunner
-                .withPropertyValues("rate-limit.max-wait-time-millis=45000")
+                .withPropertyValues("rate-limit.max-wait-seconds=45")
                 .run(context -> {
                     RestClient.Builder builder = context.getBean(RestClient.Builder.class);
                     RateLimitProperties properties = context.getBean(RateLimitProperties.class);
 
-                    assertThat(properties.getMaxWaitTimeMillis()).isEqualTo(45000);
+                    assertThat(properties.getMaxWaitSeconds()).isEqualTo(45);
                     assertThat(builder).isNotNull();
                 });
     }

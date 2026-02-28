@@ -22,6 +22,9 @@ dependencies {
     implementation("org.springframework.boot:spring-boot-autoconfigure")
     implementation("org.springframework:spring-web")
 
+    // Validation for @ConfigurationProperties
+    implementation("org.springframework.boot:spring-boot-starter-validation")
+
     // Optional WebFlux support for WebClient
     compileOnly("org.springframework:spring-webflux")
     compileOnly("org.springframework.boot:spring-boot-webclient")

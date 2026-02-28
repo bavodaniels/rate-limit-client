@@ -30,7 +30,7 @@ import org.springframework.web.reactive.function.client.WebClient;
  *   <li>rate-limit.clients.rest-template.enabled - RestTemplate-specific enable/disable (default: true)</li>
  *   <li>rate-limit.clients.rest-client.enabled - RestClient-specific enable/disable (default: true)</li>
  *   <li>rate-limit.clients.web-client.enabled - WebClient-specific enable/disable (default: true)</li>
- *   <li>rate-limit.max-wait-time-millis - Maximum wait time before throwing exception (default: 30000)</li>
+ *   <li>rate-limit.max-wait-seconds - Maximum wait time in seconds before throwing exception (default: 5)</li>
  * </ul>
  *
  * @since 1.0.0
@@ -96,7 +96,7 @@ public class RateLimitAutoConfiguration {
                 if (bean instanceof RestTemplate restTemplate) {
                     RestTemplateRateLimitInterceptor interceptor = new RestTemplateRateLimitInterceptor(
                             rateLimitTracker,
-                            properties.getMaxWaitTimeMillis()
+                            properties.getMaxWaitSeconds() * 1000L
                     );
 
                     // Add the interceptor to the existing interceptor list
@@ -139,7 +139,7 @@ public class RateLimitAutoConfiguration {
                 RateLimitProperties properties) {
             RestTemplateRateLimitInterceptor interceptor = new RestTemplateRateLimitInterceptor(
                     rateLimitTracker,
-                    properties.getMaxWaitTimeMillis()
+                    properties.getMaxWaitSeconds() * 1000L
             );
             return RestClient.builder().requestInterceptor(interceptor);
         }
@@ -171,7 +171,7 @@ public class RateLimitAutoConfiguration {
             return webClientBuilder -> {
                 WebClientRateLimitFilter filter = new WebClientRateLimitFilter(
                         rateLimitTracker,
-                        properties.getMaxWaitTimeMillis()
+                        properties.getMaxWaitSeconds() * 1000L
                 );
                 webClientBuilder.filter(filter);
             };
