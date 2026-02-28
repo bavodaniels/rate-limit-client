@@ -33,6 +33,7 @@ dependencies {
     testImplementation("org.springframework.boot:spring-boot-starter-test")
     testImplementation("org.springframework:spring-webflux")
     testImplementation("io.projectreactor.netty:reactor-netty")
+    testImplementation("io.projectreactor:reactor-test")
 }
 
 tasks.withType<Test> {
