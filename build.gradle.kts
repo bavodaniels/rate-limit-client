@@ -24,6 +24,7 @@ dependencies {
 
     // Optional WebFlux support for WebClient
     compileOnly("org.springframework:spring-webflux")
+    compileOnly("org.springframework.boot:spring-boot-webclient")
     compileOnly("io.projectreactor.netty:reactor-netty")
 
     // Annotation processing for configuration properties
@@ -32,6 +33,7 @@ dependencies {
     // Test dependencies
     testImplementation("org.springframework.boot:spring-boot-starter-test")
     testImplementation("org.springframework:spring-webflux")
+    testImplementation("org.springframework.boot:spring-boot-webclient")
     testImplementation("io.projectreactor.netty:reactor-netty")
     testImplementation("io.projectreactor:reactor-test")
 }
