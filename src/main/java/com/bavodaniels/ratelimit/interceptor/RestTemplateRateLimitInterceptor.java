@@ -57,9 +57,10 @@ public class RestTemplateRateLimitInterceptor implements ClientHttpRequestInterc
             throws IOException {
 
         String host = extractHost(request.getURI());
+        String endpoint = extractEndpoint(request.getURI());
 
         // Pre-request: Check rate limit state and handle blocking
-        handlePreRequest(host);
+        handlePreRequest(host, endpoint);
 
         ClientHttpResponse response = null;
         try {
@@ -88,9 +89,10 @@ public class RestTemplateRateLimitInterceptor implements ClientHttpRequestInterc
      * Checks the current rate limit state and blocks the thread if necessary.
      *
      * @param host the host to check
+     * @param endpoint the endpoint being accessed
      * @throws RateLimitExceededException if the required wait time exceeds the threshold
      */
-    private void handlePreRequest(String host) {
+    private void handlePreRequest(String host, String endpoint) {
         RateLimitState state = rateLimitTracker.getState(host);
 
         if (state.requiresWait()) {
@@ -98,7 +100,9 @@ public class RestTemplateRateLimitInterceptor implements ClientHttpRequestInterc
 
             // Check if wait time exceeds threshold
             if (waitTime > maxWaitTimeMillis) {
-                throw new RateLimitExceededException(host, waitTime, maxWaitTimeMillis);
+                java.time.Instant retryAfter = state.getResetTime();
+                java.time.Duration waitDuration = java.time.Duration.ofMillis(waitTime);
+                throw new RateLimitExceededException(host, endpoint, retryAfter, waitDuration);
             }
 
             // Block the thread for the required wait time
@@ -146,6 +150,23 @@ public class RestTemplateRateLimitInterceptor implements ClientHttpRequestInterc
         }
 
         return host;
+    }
+
+    /**
+     * Extracts the endpoint (path + query) from a URI.
+     *
+     * @param uri the URI to extract from
+     * @return the endpoint path and query string
+     */
+    private String extractEndpoint(URI uri) {
+        String path = uri.getPath();
+        String query = uri.getQuery();
+
+        if (query != null && !query.isEmpty()) {
+            return path + "?" + query;
+        }
+
+        return path != null && !path.isEmpty() ? path : "/";
     }
 
     /**
