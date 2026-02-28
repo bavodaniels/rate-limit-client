@@ -56,9 +56,10 @@ public class WebClientRateLimitFilter implements ExchangeFilterFunction {
     @Override
     public Mono<ClientResponse> filter(ClientRequest request, ExchangeFunction next) {
         String host = extractHost(request.url());
+        String endpoint = extractEndpoint(request.url());
 
         // Pre-request: Check rate limit state and handle non-blocking delay
-        return handlePreRequest(host)
+        return handlePreRequest(host, endpoint)
                 .then(Mono.defer(() -> next.exchange(request)))
                 .flatMap(response -> handlePostResponse(host, response));
     }
@@ -68,9 +69,10 @@ public class WebClientRateLimitFilter implements ExchangeFilterFunction {
      * Checks the current rate limit state and returns a Mono that delays if necessary.
      *
      * @param host the host to check
+     * @param endpoint the endpoint being accessed
      * @return a Mono that completes after any required delay, or emits an error if threshold exceeded
      */
-    private Mono<Void> handlePreRequest(String host) {
+    private Mono<Void> handlePreRequest(String host, String endpoint) {
         return Mono.fromCallable(() -> rateLimitTracker.getState(host))
                 .flatMap(state -> {
                     if (state.requiresWait()) {
@@ -78,7 +80,9 @@ public class WebClientRateLimitFilter implements ExchangeFilterFunction {
 
                         // Check if wait time exceeds threshold
                         if (waitTime > maxWaitTimeMillis) {
-                            return Mono.error(new RateLimitExceededException(host, waitTime, maxWaitTimeMillis));
+                            java.time.Instant retryAfter = state.getResetTime();
+                            java.time.Duration waitDuration = Duration.ofMillis(waitTime);
+                            return Mono.error(new RateLimitExceededException(host, endpoint, retryAfter, waitDuration));
                         }
 
                         // Non-blocking delay using Mono.delay()
@@ -125,6 +129,23 @@ public class WebClientRateLimitFilter implements ExchangeFilterFunction {
         }
 
         return host;
+    }
+
+    /**
+     * Extracts the endpoint (path + query) from a URI.
+     *
+     * @param uri the URI to extract from
+     * @return the endpoint path and query string
+     */
+    private String extractEndpoint(URI uri) {
+        String path = uri.getPath();
+        String query = uri.getQuery();
+
+        if (query != null && !query.isEmpty()) {
+            return path + "?" + query;
+        }
+
+        return path != null && !path.isEmpty() ? path : "/";
     }
 
     /**
