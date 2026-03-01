@@ -12,7 +12,10 @@ import org.springframework.http.HttpStatus;
 import org.springframework.http.client.ClientHttpRequestFactory;
 import org.springframework.http.client.ClientHttpResponse;
 import org.springframework.mock.http.client.MockClientHttpResponse;
+import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.client.RestClient;
+import org.springframework.web.client.support.RestClientAdapter;
 import org.springframework.web.service.annotation.DeleteExchange;
 import org.springframework.web.service.annotation.GetExchange;
 import org.springframework.web.service.annotation.HttpExchange;
@@ -41,19 +44,19 @@ class HttpExchangeRateLimitRestClientTest {
     interface SampleApiClient {
 
         @GetExchange("/users/{id}")
-        String getUser(String id);
+        String getUser(@PathVariable("id") String id);
 
         @PostExchange("/users")
-        String createUser(String userData);
+        String createUser(@RequestBody String userData);
 
         @PutExchange("/users/{id}")
-        String updateUser(String id, String userData);
+        String updateUser(@PathVariable("id") String id, @RequestBody String userData);
 
         @PatchExchange("/users/{id}")
-        String patchUser(String id, String partialData);
+        String patchUser(@PathVariable("id") String id, @RequestBody String partialData);
 
         @DeleteExchange("/users/{id}")
-        String deleteUser(String id);
+        String deleteUser(@PathVariable("id") String id);
 
         @GetExchange("/health")
         String healthCheck();
@@ -75,7 +78,7 @@ class HttpExchangeRateLimitRestClientTest {
 
         // Create HttpServiceProxyFactory backed by RestClient
         HttpServiceProxyFactory factory = HttpServiceProxyFactory
-                .builderFor(RestClient.RestClientAdapter.create(restClient))
+                .builderFor(RestClientAdapter.create(restClient))
                 .build();
 
         // Create proxy instance of our API client

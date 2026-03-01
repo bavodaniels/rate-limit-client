@@ -47,6 +47,13 @@ class RestTemplateRateLimitInterceptorTest {
     }
 
     @Test
+    void testConstructorWithDefaultMaxWaitTime() {
+        RestTemplateRateLimitInterceptor defaultInterceptor = new RestTemplateRateLimitInterceptor(tracker);
+        assertEquals(30000, defaultInterceptor.getMaxWaitTimeMillis());
+        assertEquals(tracker, defaultInterceptor.getRateLimitTracker());
+    }
+
+    @Test
     void testSuccessfulRequestWithNoRateLimitHeaders() throws IOException {
         HttpRequest request = createMockRequest("http://api.example.com/test");
         byte[] body = new byte[0];
@@ -201,6 +208,100 @@ class RestTemplateRateLimitInterceptorTest {
     void testGetters() {
         assertEquals(tracker, interceptor.getRateLimitTracker());
         assertEquals(5000, interceptor.getMaxWaitTimeMillis());
+    }
+
+    @Test
+    void testIOExceptionDuringExecution() {
+        HttpRequest request = createMockRequest("http://api.example.com/test");
+        byte[] body = new byte[0];
+
+        ClientHttpRequestExecution execution = (req, b) -> {
+            throw new IOException("Network error");
+        };
+
+        assertThrows(IOException.class, () ->
+                interceptor.intercept(request, body, execution));
+    }
+
+    @Test
+    void testIOExceptionWithResponseCleanup() {
+        HttpRequest request = createMockRequest("http://api.example.com/test");
+        byte[] body = new byte[0];
+
+        ClientHttpRequestExecution execution = (req, b) -> {
+            // Return a response but then throw IOException
+            MockClientHttpResponse response = new MockClientHttpResponse(new byte[0], HttpStatus.OK);
+            // Simulate error after response is created
+            throw new IOException("Network error after response");
+        };
+
+        assertThrows(IOException.class, () ->
+                interceptor.intercept(request, body, execution));
+    }
+
+    @Test
+    void testExceptionInHandlePostResponse() throws IOException {
+        HttpRequest request = createMockRequest("http://api.example.com/test");
+        byte[] body = new byte[0];
+
+        // Create a tracker that throws an exception
+        RateLimitTracker faultyTracker = new RateLimitTracker() {
+            @Override
+            public RateLimitState getState(String host) {
+                return new RateLimitState(host, "/test");
+            }
+
+            @Override
+            public void updateFromHeaders(String host, HttpHeaders headers) {
+                throw new RuntimeException("Failed to parse headers");
+            }
+
+            @Override
+            public void clearState(String host) {}
+
+            @Override
+            public void clearAll() {}
+        };
+
+        RestTemplateRateLimitInterceptor faultyInterceptor = new RestTemplateRateLimitInterceptor(faultyTracker, 5000);
+
+        HttpHeaders responseHeaders = new HttpHeaders();
+        responseHeaders.set("X-RateLimit-Limit", "100");
+
+        ClientHttpRequestExecution execution = createMockExecution(HttpStatus.OK, responseHeaders);
+
+        // Should not throw exception, just log and continue
+        ClientHttpResponse response = faultyInterceptor.intercept(request, body, execution);
+        assertNotNull(response);
+        assertEquals(HttpStatus.OK, response.getStatusCode());
+    }
+
+    @Test
+    void testExtractEndpointWithQueryString() throws IOException {
+        HttpRequest request = createMockRequest("http://api.example.com/test?param1=value1&param2=value2");
+        byte[] body = new byte[0];
+
+        HttpHeaders responseHeaders = new HttpHeaders();
+        responseHeaders.set("X-RateLimit-Limit", "100");
+
+        ClientHttpRequestExecution execution = createMockExecution(HttpStatus.OK, responseHeaders);
+
+        ClientHttpResponse response = interceptor.intercept(request, body, execution);
+        assertNotNull(response);
+    }
+
+    @Test
+    void testExtractEndpointWithEmptyPath() throws IOException {
+        HttpRequest request = createMockRequest("http://api.example.com");
+        byte[] body = new byte[0];
+
+        HttpHeaders responseHeaders = new HttpHeaders();
+        responseHeaders.set("X-RateLimit-Limit", "100");
+
+        ClientHttpRequestExecution execution = createMockExecution(HttpStatus.OK, responseHeaders);
+
+        ClientHttpResponse response = interceptor.intercept(request, body, execution);
+        assertNotNull(response);
     }
 
     // Helper methods

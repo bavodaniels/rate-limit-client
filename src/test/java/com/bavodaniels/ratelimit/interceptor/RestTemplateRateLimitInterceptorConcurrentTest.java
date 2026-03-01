@@ -119,6 +119,7 @@ class RestTemplateRateLimitInterceptorConcurrentTest {
 
         // Set initial state requiring a short wait
         HttpHeaders headers = new HttpHeaders();
+        headers.set("X-RateLimit-Remaining", "0");
         headers.set("Retry-After", "1"); // 1 second wait
         tracker.updateFromHeaders(host, headers);
 

@@ -94,15 +94,17 @@ public class RestTemplateRateLimitInterceptor implements ClientHttpRequestInterc
      */
     private void handlePreRequest(String host, String endpoint) {
         RateLimitState state = rateLimitTracker.getState(host);
+        java.time.Instant now = java.time.Instant.now();
 
-        if (state.requiresWait()) {
-            long waitTime = state.getRetryAfterMillis();
+        if (!state.canMakeRequest(now)) {
+            long waitTimeSeconds = state.getWaitTimeSeconds(now);
+            long waitTime = waitTimeSeconds * 1000;
 
             // Check if wait time exceeds threshold
             if (waitTime > maxWaitTimeMillis) {
-                java.time.Instant retryAfter = state.getResetTime();
-                java.time.Duration waitDuration = java.time.Duration.ofMillis(waitTime);
-                throw new RateLimitExceededException(host, endpoint, retryAfter, waitDuration);
+                java.time.Instant retryAfter = state.getCurrentInfo().resetTime();
+                java.time.Duration waitDuration = java.time.Duration.ofSeconds(waitTimeSeconds);
+                throw new RateLimitExceededException(host, endpoint, retryAfter, waitDuration, maxWaitTimeMillis);
             }
 
             // Block the thread for the required wait time

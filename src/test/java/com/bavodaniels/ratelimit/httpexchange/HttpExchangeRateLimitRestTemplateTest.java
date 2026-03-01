@@ -12,6 +12,7 @@ import org.springframework.http.HttpStatus;
 import org.springframework.http.client.ClientHttpRequestFactory;
 import org.springframework.http.client.ClientHttpResponse;
 import org.springframework.mock.http.client.MockClientHttpResponse;
+import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.client.RestTemplate;
 import org.springframework.web.client.support.RestTemplateAdapter;
 import org.springframework.web.service.annotation.GetExchange;
@@ -41,7 +42,7 @@ class HttpExchangeRateLimitRestTemplateTest {
         String getData();
 
         @PostExchange("/data")
-        String postData(String payload);
+        String postData(@RequestBody String payload);
 
         @GetExchange("/status")
         String getStatus();

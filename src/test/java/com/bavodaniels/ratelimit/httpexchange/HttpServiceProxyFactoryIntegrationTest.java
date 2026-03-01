@@ -1,11 +1,13 @@
 package com.bavodaniels.ratelimit.httpexchange;
 
 import com.bavodaniels.ratelimit.config.RateLimitAutoConfiguration;
+import com.bavodaniels.ratelimit.config.RateLimitProperties;
 import com.bavodaniels.ratelimit.exception.RateLimitExceededException;
 import com.bavodaniels.ratelimit.model.RateLimitState;
 import com.bavodaniels.ratelimit.tracker.RateLimitTracker;
 import org.junit.jupiter.api.Test;
 import org.springframework.boot.autoconfigure.AutoConfigurations;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean;
 import org.springframework.boot.test.context.runner.ApplicationContextRunner;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -16,6 +18,7 @@ import org.springframework.http.client.ClientHttpRequestFactory;
 import org.springframework.http.client.ClientHttpResponse;
 import org.springframework.mock.http.client.MockClientHttpRequest;
 import org.springframework.mock.http.client.MockClientHttpResponse;
+import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.client.RestClient;
 import org.springframework.web.client.support.RestClientAdapter;
 import org.springframework.web.reactive.function.client.WebClient;
@@ -46,7 +49,7 @@ class HttpServiceProxyFactoryIntegrationTest {
     @HttpExchange("http://api.example.com")
     interface TestApiClient {
         @GetExchange("/users/{id}")
-        String getUser(String id);
+        String getUser(@PathVariable("id") String id);
 
         @GetExchange("/health")
         String healthCheck();
@@ -57,6 +60,12 @@ class HttpServiceProxyFactoryIntegrationTest {
      */
     @Configuration
     static class RestClientProxyFactoryConfig {
+
+        @Bean
+        @ConditionalOnMissingBean
+        public RestClient.Builder restClientBuilder() {
+            return RestClient.builder();
+        }
 
         @Bean
         public ClientHttpRequestFactory mockRequestFactory() {
@@ -80,12 +89,24 @@ class HttpServiceProxyFactoryIntegrationTest {
 
         @Bean
         public HttpServiceProxyFactory httpServiceProxyFactory(
-                RestClient.Builder restClientBuilder,
+                java.util.Optional<RateLimitTracker> rateLimitTracker,
+                java.util.Optional<RateLimitProperties> properties,
                 ClientHttpRequestFactory requestFactory) {
-            RestClient restClient = restClientBuilder
+            RestClient.Builder builder = RestClient.builder()
                     .baseUrl("http://api.example.com")
-                    .requestFactory(requestFactory)
-                    .build();
+                    .requestFactory(requestFactory);
+
+            // Only add rate limit interceptor if rate limiting is enabled
+            if (rateLimitTracker.isPresent() && properties.isPresent()) {
+                com.bavodaniels.ratelimit.interceptor.RestTemplateRateLimitInterceptor interceptor =
+                        new com.bavodaniels.ratelimit.interceptor.RestTemplateRateLimitInterceptor(
+                                rateLimitTracker.get(),
+                                properties.get().getMaxWaitTimeMillis()
+                        );
+                builder.requestInterceptor(interceptor);
+            }
+
+            RestClient restClient = builder.build();
 
             return HttpServiceProxyFactory
                     .builderFor(RestClientAdapter.create(restClient))
@@ -103,6 +124,12 @@ class HttpServiceProxyFactoryIntegrationTest {
      */
     @Configuration
     static class WebClientProxyFactoryConfig {
+
+        @Bean
+        @ConditionalOnMissingBean
+        public WebClient.Builder webClientBuilder() {
+            return WebClient.builder();
+        }
 
         @Bean
         public HttpServiceProxyFactory httpServiceProxyFactory(WebClient.Builder webClientBuilder) {

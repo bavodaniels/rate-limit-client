@@ -156,7 +156,7 @@ class RateLimitPropertiesTest {
 
         assertThat(violations).isNotEmpty();
         assertThat(violations).anyMatch(v ->
-                v.getPropertyPath().toString().equals("maxWaitSeconds") &&
+                v.getPropertyPath().toString().equals("maxWaitTimeMillis") &&
                         v.getMessage().contains("must be greater than 0")
         );
     }
@@ -170,7 +170,7 @@ class RateLimitPropertiesTest {
 
         assertThat(violations).isNotEmpty();
         assertThat(violations).anyMatch(v ->
-                v.getPropertyPath().toString().equals("maxWaitSeconds")
+                v.getPropertyPath().toString().equals("maxWaitTimeMillis")
         );
     }
 

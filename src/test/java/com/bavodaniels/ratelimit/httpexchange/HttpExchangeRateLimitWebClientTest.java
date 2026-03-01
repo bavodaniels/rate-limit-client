@@ -9,6 +9,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
+import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.reactive.function.client.ClientRequest;
 import org.springframework.web.reactive.function.client.ClientResponse;
 import org.springframework.web.reactive.function.client.ExchangeFunction;
@@ -41,7 +42,7 @@ class HttpExchangeRateLimitWebClientTest {
         String getData();
 
         @PostExchange("/reactive/data")
-        String postData(String payload);
+        String postData(@RequestBody String payload);
 
         @GetExchange("/reactive/ping")
         String ping();

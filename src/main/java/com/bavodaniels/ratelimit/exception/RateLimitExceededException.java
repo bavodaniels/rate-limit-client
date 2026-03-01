@@ -25,6 +25,7 @@ public class RateLimitExceededException extends RuntimeException implements Seri
     private final String endpoint;
     private final Instant retryAfter;
     private final Duration waitDuration;
+    private final Long thresholdMillis;
 
     /**
      * Creates a new RateLimitExceededException with full metadata.
@@ -35,11 +36,25 @@ public class RateLimitExceededException extends RuntimeException implements Seri
      * @param waitDuration the duration to wait before retrying
      */
     public RateLimitExceededException(String host, String endpoint, Instant retryAfter, Duration waitDuration) {
+        this(host, endpoint, retryAfter, waitDuration, null);
+    }
+
+    /**
+     * Creates a new RateLimitExceededException with full metadata including threshold.
+     *
+     * @param host the host that rate limited the request
+     * @param endpoint the endpoint that was rate limited
+     * @param retryAfter the time after which the request can be retried
+     * @param waitDuration the duration to wait before retrying
+     * @param thresholdMillis the maximum wait threshold in milliseconds that was exceeded
+     */
+    public RateLimitExceededException(String host, String endpoint, Instant retryAfter, Duration waitDuration, Long thresholdMillis) {
         super(buildMessage(host, endpoint, retryAfter, waitDuration));
         this.host = host;
         this.endpoint = endpoint;
         this.retryAfter = retryAfter;
         this.waitDuration = waitDuration;
+        this.thresholdMillis = thresholdMillis;
     }
 
     /**
@@ -52,11 +67,26 @@ public class RateLimitExceededException extends RuntimeException implements Seri
      * @param waitDuration the duration to wait before retrying
      */
     public RateLimitExceededException(String message, String host, String endpoint, Instant retryAfter, Duration waitDuration) {
+        this(message, host, endpoint, retryAfter, waitDuration, null);
+    }
+
+    /**
+     * Creates a new RateLimitExceededException with a custom message and metadata including threshold.
+     *
+     * @param message the custom error message
+     * @param host the host that rate limited the request
+     * @param endpoint the endpoint that was rate limited
+     * @param retryAfter the time after which the request can be retried
+     * @param waitDuration the duration to wait before retrying
+     * @param thresholdMillis the maximum wait threshold in milliseconds that was exceeded
+     */
+    public RateLimitExceededException(String message, String host, String endpoint, Instant retryAfter, Duration waitDuration, Long thresholdMillis) {
         super(message);
         this.host = host;
         this.endpoint = endpoint;
         this.retryAfter = retryAfter;
         this.waitDuration = waitDuration;
+        this.thresholdMillis = thresholdMillis;
     }
 
     /**
@@ -113,5 +143,23 @@ public class RateLimitExceededException extends RuntimeException implements Seri
      */
     public Duration getWaitDuration() {
         return waitDuration;
+    }
+
+    /**
+     * Gets the wait time in milliseconds.
+     *
+     * @return the wait time in milliseconds
+     */
+    public long getWaitTimeMillis() {
+        return waitDuration.toMillis();
+    }
+
+    /**
+     * Gets the maximum wait threshold in milliseconds that was exceeded.
+     *
+     * @return the threshold in milliseconds, or null if not set
+     */
+    public Long getThresholdMillis() {
+        return thresholdMillis;
     }
 }

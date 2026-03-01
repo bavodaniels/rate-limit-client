@@ -75,14 +75,16 @@ public class WebClientRateLimitFilter implements ExchangeFilterFunction {
     private Mono<Void> handlePreRequest(String host, String endpoint) {
         return Mono.fromCallable(() -> rateLimitTracker.getState(host))
                 .flatMap(state -> {
-                    if (state.requiresWait()) {
-                        long waitTime = state.getRetryAfterMillis();
+                    java.time.Instant now = java.time.Instant.now();
+                    if (!state.canMakeRequest(now)) {
+                        long waitTimeSeconds = state.getWaitTimeSeconds(now);
+                        long waitTime = waitTimeSeconds * 1000;
 
                         // Check if wait time exceeds threshold
                         if (waitTime > maxWaitTimeMillis) {
-                            java.time.Instant retryAfter = state.getResetTime();
-                            java.time.Duration waitDuration = Duration.ofMillis(waitTime);
-                            return Mono.error(new RateLimitExceededException(host, endpoint, retryAfter, waitDuration));
+                            java.time.Instant retryAfter = state.getCurrentInfo().resetTime();
+                            java.time.Duration waitDuration = Duration.ofSeconds(waitTimeSeconds);
+                            return Mono.error(new RateLimitExceededException(host, endpoint, retryAfter, waitDuration, maxWaitTimeMillis));
                         }
 
                         // Non-blocking delay using Mono.delay()

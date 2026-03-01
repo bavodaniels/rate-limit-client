@@ -158,6 +158,28 @@ public class RateLimitAutoConfiguration {
     static class WebClientConfiguration {
 
         /**
+         * Creates a WebClient.Builder bean with the rate limit filter pre-configured.
+         * Only creates the bean if no user-defined WebClient.Builder exists.
+         * Users can still customize this builder further or define their own.
+         *
+         * @param rateLimitTracker the tracker to use for rate limiting
+         * @param properties the rate limit configuration properties
+         * @return a WebClient.Builder with rate limit filter
+         */
+        @Bean
+        @ConditionalOnMissingBean
+        @ConditionalOnProperty(prefix = "rate-limit.clients.web-client", name = "enabled", havingValue = "true", matchIfMissing = true)
+        public WebClient.Builder webClientBuilder(
+                RateLimitTracker rateLimitTracker,
+                RateLimitProperties properties) {
+            WebClientRateLimitFilter filter = new WebClientRateLimitFilter(
+                    rateLimitTracker,
+                    properties.getMaxWaitTimeMillis()
+            );
+            return WebClient.builder().filter(filter);
+        }
+
+        /**
          * Creates a WebClientCustomizer that adds the rate limit filter to all WebClient.Builder beans.
          * This customizer is applied to all WebClient.Builder instances during their creation,
          * ensuring the rate limit filter is automatically added without interfering with

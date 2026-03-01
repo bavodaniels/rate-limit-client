@@ -45,41 +45,71 @@ public class RateLimitHeaderParser {
     /**
      * Parses the rate limit (maximum requests allowed) from headers.
      * Checks multiple header formats in order of preference.
+     * Only falls back to alternative formats if the preferred header is not present.
      *
      * @param headerValue function to retrieve header value by name (case-insensitive)
      * @return Optional containing the rate limit, or empty if not found or malformed
      */
     public Optional<Long> parseLimit(HeaderValueProvider headerValue) {
-        return parsePositiveLong(headerValue, X_RATELIMIT_LIMIT)
-                .or(() -> parsePositiveLong(headerValue, RATELIMIT_LIMIT))
-                .or(() -> parsePositiveLong(headerValue, STRIPE_RATELIMIT_LIMIT));
+        // Check if X-RateLimit-Limit exists
+        if (headerValue.getHeader(X_RATELIMIT_LIMIT) != null) {
+            return parsePositiveLong(headerValue, X_RATELIMIT_LIMIT);
+        }
+
+        // Fallback to RateLimit-Limit if X-RateLimit-Limit not present
+        if (headerValue.getHeader(RATELIMIT_LIMIT) != null) {
+            return parsePositiveLong(headerValue, RATELIMIT_LIMIT);
+        }
+
+        // Fallback to Stripe format if neither of the above are present
+        return parsePositiveLong(headerValue, STRIPE_RATELIMIT_LIMIT);
     }
 
     /**
      * Parses the remaining requests count from headers.
      * Checks multiple header formats in order of preference.
+     * Only falls back to alternative formats if the preferred header is not present.
      *
      * @param headerValue function to retrieve header value by name (case-insensitive)
      * @return Optional containing the remaining count, or empty if not found or malformed
      */
     public Optional<Long> parseRemaining(HeaderValueProvider headerValue) {
-        return parsePositiveLong(headerValue, X_RATELIMIT_REMAINING)
-                .or(() -> parsePositiveLong(headerValue, RATELIMIT_REMAINING))
-                .or(() -> parsePositiveLong(headerValue, STRIPE_RATELIMIT_REMAINING));
+        // Check if X-RateLimit-Remaining exists
+        if (headerValue.getHeader(X_RATELIMIT_REMAINING) != null) {
+            return parsePositiveLong(headerValue, X_RATELIMIT_REMAINING);
+        }
+
+        // Fallback to RateLimit-Remaining if X-RateLimit-Remaining not present
+        if (headerValue.getHeader(RATELIMIT_REMAINING) != null) {
+            return parsePositiveLong(headerValue, RATELIMIT_REMAINING);
+        }
+
+        // Fallback to Stripe format if neither of the above are present
+        return parsePositiveLong(headerValue, STRIPE_RATELIMIT_REMAINING);
     }
 
     /**
      * Parses the rate limit reset time from headers.
      * Supports Unix timestamp (seconds since epoch) format.
      * Checks multiple header formats in order of preference.
+     * Only falls back to alternative formats if the preferred header is not present.
      *
      * @param headerValue function to retrieve header value by name (case-insensitive)
      * @return Optional containing the reset time as Instant, or empty if not found or malformed
      */
     public Optional<Instant> parseReset(HeaderValueProvider headerValue) {
-        return parseUnixTimestamp(headerValue, X_RATELIMIT_RESET)
-                .or(() -> parseUnixTimestamp(headerValue, RATELIMIT_RESET))
-                .or(() -> parseUnixTimestamp(headerValue, STRIPE_RATELIMIT_RESET));
+        // Check if X-RateLimit-Reset exists
+        if (headerValue.getHeader(X_RATELIMIT_RESET) != null) {
+            return parseUnixTimestamp(headerValue, X_RATELIMIT_RESET);
+        }
+
+        // Fallback to RateLimit-Reset if X-RateLimit-Reset not present
+        if (headerValue.getHeader(RATELIMIT_RESET) != null) {
+            return parseUnixTimestamp(headerValue, RATELIMIT_RESET);
+        }
+
+        // Fallback to Stripe format if neither of the above are present
+        return parseUnixTimestamp(headerValue, STRIPE_RATELIMIT_RESET);
     }
 
     /**
@@ -147,6 +177,11 @@ public class RateLimitHeaderParser {
             return Optional.empty();
         }
 
+        // Reject values containing control characters or invalid characters
+        if (containsInvalidCharacters(value)) {
+            return Optional.empty();
+        }
+
         try {
             long parsed = Long.parseLong(value.trim());
             return parsed >= 0 ? Optional.of(parsed) : Optional.empty();
@@ -168,6 +203,11 @@ public class RateLimitHeaderParser {
             return Optional.empty();
         }
 
+        // Reject values containing control characters or invalid characters
+        if (containsInvalidCharacters(value)) {
+            return Optional.empty();
+        }
+
         try {
             long timestamp = Long.parseLong(value.trim());
             // Validate reasonable timestamp (not negative, not too far in the future)
@@ -178,6 +218,42 @@ public class RateLimitHeaderParser {
         } catch (NumberFormatException e) {
             return Optional.empty();
         }
+    }
+
+    /**
+     * Checks if a string contains invalid characters for numeric header values.
+     * Rejects control characters, null bytes, and other non-numeric characters except whitespace.
+     *
+     * @param value the string to check
+     * @return true if the string contains invalid characters
+     */
+    private boolean containsInvalidCharacters(String value) {
+        if (value == null) {
+            return false;
+        }
+
+        // Check all characters in the original value
+        for (int i = 0; i < value.length(); i++) {
+            char c = value.charAt(i);
+
+            // Allow: digits, spaces, and tabs
+            if (c == ' ' || c == '\t' || Character.isDigit(c)) {
+                continue; // Valid character
+            }
+
+            // Reject everything else: control characters, plus signs, letters, etc.
+            if (c == '+') {
+                return true; // Explicitly reject plus sign
+            }
+            if (Character.isISOControl(c)) {
+                return true; // Reject all control characters (includes \0, \n, \r, etc.)
+            }
+
+            // Reject any other character (letters, special symbols, etc.)
+            return true;
+        }
+
+        return false;
     }
 
     /**

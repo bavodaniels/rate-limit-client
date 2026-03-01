@@ -1,6 +1,8 @@
 package com.bavodaniels.ratelimit.tracker;
 
+import com.bavodaniels.ratelimit.model.RateLimitInfo;
 import com.bavodaniels.ratelimit.model.RateLimitState;
+import com.bavodaniels.ratelimit.parser.RateLimitHeaderParser;
 import org.springframework.http.HttpHeaders;
 
 import java.time.Instant;
@@ -14,32 +16,39 @@ import java.util.concurrent.ConcurrentHashMap;
  */
 public class InMemoryRateLimitTracker implements RateLimitTracker {
 
+    private static final String DEFAULT_ENDPOINT = "*";
     private final ConcurrentHashMap<String, RateLimitState> states = new ConcurrentHashMap<>();
+    private final RateLimitHeaderParser parser = new RateLimitHeaderParser();
 
     @Override
     public RateLimitState getState(String host) {
-        return states.getOrDefault(host, createDefaultState());
+        return states.computeIfAbsent(host, h -> new RateLimitState(h, DEFAULT_ENDPOINT));
     }
 
     @Override
     public void updateFromHeaders(String host, HttpHeaders headers) {
-        Integer limit = parseIntHeader(headers, "X-RateLimit-Limit");
-        Integer remaining = parseIntHeader(headers, "X-RateLimit-Remaining");
-        Long reset = parseLongHeader(headers, "X-RateLimit-Reset");
-        Long retryAfter = parseLongHeader(headers, "Retry-After");
+        // Create a header value provider for the parser
+        RateLimitHeaderParser.HeaderValueProvider headerProvider = headers::getFirst;
 
-        if (limit == null && remaining == null && reset == null && retryAfter == null) {
+        // Parse headers using the RateLimitHeaderParser
+        Long limit = parser.parseLimit(headerProvider).orElse(null);
+        Long remaining = parser.parseRemaining(headerProvider).orElse(null);
+        Instant resetInstant = parser.parseReset(headerProvider).orElse(null);
+        Instant retryAfterInstant = parser.parseRetryAfter(headerProvider).orElse(null);
+
+        if (limit == null && remaining == null && resetInstant == null && retryAfterInstant == null) {
             // No rate limit headers present
             return;
         }
 
-        int limitValue = limit != null ? limit : 100; // Default limit
-        int remainingValue = remaining != null ? remaining : limitValue;
-        Instant resetTime = reset != null ? Instant.ofEpochSecond(reset) : Instant.now().plusSeconds(60);
-        long retryAfterMillis = calculateRetryAfter(retryAfter, resetTime, remainingValue);
+        long limitValue = limit != null ? limit : 100; // Default limit
+        long remainingValue = remaining != null ? remaining : limitValue;
+        Instant resetTime = resetInstant != null ? resetInstant : Instant.now().plusSeconds(60);
+        long retryAfterSeconds = calculateRetryAfterSeconds(retryAfterInstant, resetTime, remainingValue);
 
-        RateLimitState newState = new RateLimitState(limitValue, remainingValue, resetTime, retryAfterMillis);
-        states.put(host, newState);
+        RateLimitInfo info = new RateLimitInfo(limitValue, remainingValue, resetTime, retryAfterSeconds);
+        RateLimitState state = getState(host);
+        state.updateRateLimitInfo(info);
     }
 
     @Override
@@ -52,44 +61,17 @@ public class InMemoryRateLimitTracker implements RateLimitTracker {
         states.clear();
     }
 
-    private RateLimitState createDefaultState() {
-        return new RateLimitState(100, 100, Instant.now().plusSeconds(60), 0);
-    }
-
-    private Integer parseIntHeader(HttpHeaders headers, String headerName) {
-        String value = headers.getFirst(headerName);
-        if (value == null || value.isEmpty()) {
-            return null;
-        }
-        try {
-            return Integer.parseInt(value);
-        } catch (NumberFormatException e) {
-            return null;
-        }
-    }
-
-    private Long parseLongHeader(HttpHeaders headers, String headerName) {
-        String value = headers.getFirst(headerName);
-        if (value == null || value.isEmpty()) {
-            return null;
-        }
-        try {
-            return Long.parseLong(value);
-        } catch (NumberFormatException e) {
-            return null;
-        }
-    }
-
-    private long calculateRetryAfter(Long retryAfter, Instant resetTime, int remaining) {
-        // If Retry-After header is present, use it (in seconds)
-        if (retryAfter != null && retryAfter > 0) {
-            return retryAfter * 1000;
+    private long calculateRetryAfterSeconds(Instant retryAfterTime, Instant resetTime, long remaining) {
+        // If Retry-After time is present, calculate wait time in seconds
+        if (retryAfterTime != null) {
+            long waitSeconds = retryAfterTime.getEpochSecond() - Instant.now().getEpochSecond();
+            return Math.max(0, waitSeconds);
         }
 
-        // If no requests remaining, calculate wait time until reset
+        // If no requests remaining, calculate wait time until reset in seconds
         if (remaining <= 0 && resetTime != null) {
-            long waitMillis = resetTime.toEpochMilli() - Instant.now().toEpochMilli();
-            return Math.max(0, waitMillis);
+            long waitSeconds = resetTime.getEpochSecond() - Instant.now().getEpochSecond();
+            return Math.max(0, waitSeconds);
         }
 
         return 0;
