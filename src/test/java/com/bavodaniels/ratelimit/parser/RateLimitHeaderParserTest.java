@@ -1221,5 +1221,82 @@ class RateLimitHeaderParserTest {
             assertTrue(parser.parseRemaining(provider).isPresent());
             assertTrue(parser.parseReset(provider).isPresent());
         }
+
+        @Test
+        @DisplayName("should handle overflow in parseReset timestamp")
+        void shouldHandleTimestampOverflow() {
+            // This value will cause NumberFormatException in parseLong within parseUnixTimestamp
+            Map<String, String> headers = Map.of("X-RateLimit-Reset", "99999999999999999999999999999");
+            Optional<Instant> result = parser.parseReset(createProvider(headers));
+
+            assertTrue(result.isEmpty());
+        }
+
+        @Test
+        @DisplayName("should handle blank Retry-After HTTP date")
+        void shouldHandleBlankRetryAfterHttpDate() {
+            // parseHttpDate should return empty for blank string
+            Map<String, String> headers = Map.of("Retry-After", "   ");
+            Optional<Instant> result = parser.parseRetryAfter(createProvider(headers));
+
+            assertTrue(result.isEmpty());
+        }
+
+        @Test
+        @DisplayName("should handle parseReset with null value via containsInvalidCharacters")
+        void shouldHandleNullInContainsInvalidCharacters() {
+            // This tests the null check in containsInvalidCharacters
+            Map<String, String> headers = new HashMap<>();
+            headers.put("X-RateLimit-Reset", null);
+
+            RateLimitHeaderParser.HeaderValueProvider provider = headers::get;
+            Optional<Instant> result = parser.parseReset(provider);
+
+            assertTrue(result.isEmpty());
+        }
+
+        @Test
+        @DisplayName("should handle null value in parseRetryAfter triggering parseHttpDate null check")
+        void shouldHandleNullRetryAfterTriggeringParseHttpDateNullCheck() {
+            // This tests the null check in parseHttpDate (line 268)
+            // by passing null through the Retry-After path
+            Map<String, String> headers = new HashMap<>();
+            headers.put("Retry-After", null);
+
+            RateLimitHeaderParser.HeaderValueProvider provider = headers::get;
+            Optional<Instant> result = parser.parseRetryAfter(provider);
+
+            assertTrue(result.isEmpty());
+        }
+    }
+
+    @Nested
+    @DisplayName("Reflection-based coverage tests for private methods")
+    class ReflectionCoverageTests {
+
+        @Test
+        @DisplayName("should cover null check in containsInvalidCharacters via reflection")
+        void shouldCoverContainsInvalidCharactersNullCheck() throws Exception {
+            java.lang.reflect.Method method = RateLimitHeaderParser.class
+                    .getDeclaredMethod("containsInvalidCharacters", String.class);
+            method.setAccessible(true);
+
+            // Call with null - should return false (line 232)
+            boolean result = (boolean) method.invoke(parser, (String) null);
+            assertFalse(result);
+        }
+
+        @Test
+        @DisplayName("should cover null check in parseHttpDate via reflection")
+        void shouldCoverParseHttpDateNullCheck() throws Exception {
+            java.lang.reflect.Method method = RateLimitHeaderParser.class
+                    .getDeclaredMethod("parseHttpDate", String.class);
+            method.setAccessible(true);
+
+            // Call with null - should return Optional.empty() (line 268)
+            @SuppressWarnings("unchecked")
+            Optional<Instant> result = (Optional<Instant>) method.invoke(parser, (String) null);
+            assertTrue(result.isEmpty());
+        }
     }
 }

@@ -280,4 +280,106 @@ class WebClientRateLimitFilterTest {
         long elapsed = System.currentTimeMillis() - startTime;
         assertTrue(elapsed < 500, "Host2 should not be delayed, but took " + elapsed + "ms");
     }
+
+    @Test
+    void testFilter_ExceptionInUpdateFromHeadersIsHandled() {
+        // Arrange - test line 111, 114: exception handling in handlePostResponse
+        String host = "api.example.com";
+
+        // Create a faulty tracker that throws exception
+        RateLimitTracker faultyTracker = new RateLimitTracker() {
+            @Override
+            public RateLimitState getState(String host) {
+                return new RateLimitState(host, "/test");
+            }
+
+            @Override
+            public void updateFromHeaders(String host, HttpHeaders headers) {
+                throw new RuntimeException("Failed to update headers");
+            }
+
+            @Override
+            public void clearState(String host) {}
+
+            @Override
+            public void clearAll() {}
+        };
+
+        WebClientRateLimitFilter faultyFilter = new WebClientRateLimitFilter(faultyTracker);
+
+        ClientRequest request = ClientRequest.create(org.springframework.http.HttpMethod.GET, URI.create("http://" + host + "/test"))
+                .build();
+
+        ClientResponse mockResponse = ClientResponse.create(HttpStatus.OK)
+                .header("X-RateLimit-Limit", "100")
+                .build();
+
+        ExchangeFunction mockExchange = r -> Mono.just(mockResponse);
+
+        // Act & Assert - should not throw exception, just log error
+        StepVerifier.create(faultyFilter.filter(request, mockExchange))
+                .expectNext(mockResponse)
+                .verifyComplete();
+    }
+
+    @Test
+    void testFilter_ExtractEndpointWithQueryString() {
+        // Arrange - test line 147: query string handling
+        String host = "api.example.com";
+        ClientRequest request = ClientRequest.create(org.springframework.http.HttpMethod.GET,
+                URI.create("http://" + host + "/test?param1=value1&param2=value2"))
+                .build();
+
+        ClientResponse mockResponse = ClientResponse.create(HttpStatus.OK)
+                .header("X-RateLimit-Limit", "100")
+                .build();
+
+        ExchangeFunction mockExchange = r -> Mono.just(mockResponse);
+
+        // Act & Assert
+        StepVerifier.create(filter.filter(request, mockExchange))
+                .expectNext(mockResponse)
+                .verifyComplete();
+
+        // Verify state was updated (which means extractEndpoint worked correctly)
+        RateLimitState state = tracker.getState(host);
+        assertEquals(100, state.getLimit());
+    }
+
+    @Test
+    void testFilter_ExtractEndpointWithNullQuery() {
+        // Arrange - test line 147: null query handling
+        String host = "api.example.com";
+        ClientRequest request = ClientRequest.create(org.springframework.http.HttpMethod.GET,
+                URI.create("http://" + host + "/test"))
+                .build();
+
+        ClientResponse mockResponse = ClientResponse.create(HttpStatus.OK)
+                .header("X-RateLimit-Limit", "100")
+                .build();
+
+        ExchangeFunction mockExchange = r -> Mono.just(mockResponse);
+
+        // Act & Assert
+        StepVerifier.create(filter.filter(request, mockExchange))
+                .expectNext(mockResponse)
+                .verifyComplete();
+    }
+
+    @Test
+    void testFilter_ExtractEndpointWithEmptyPath() {
+        // Arrange - test endpoint extraction with empty path
+        String host = "api.example.com";
+        ClientRequest request = ClientRequest.create(org.springframework.http.HttpMethod.GET,
+                URI.create("http://" + host))
+                .build();
+
+        ClientResponse mockResponse = ClientResponse.create(HttpStatus.OK).build();
+        ExchangeFunction mockExchange = r -> Mono.just(mockResponse);
+
+        // Act & Assert
+        StepVerifier.create(filter.filter(request, mockExchange))
+                .expectNext(mockResponse)
+                .verifyComplete();
+    }
 }

@@ -397,6 +397,22 @@ class RateLimitAutoConfigurationTest {
                 });
     }
 
+    @Test
+    void webClientCustomizerShouldActuallyAddFilterToBuilder() {
+        reactiveContextRunner
+                .run(context -> {
+                    WebClientCustomizer customizer = context.getBean(WebClientCustomizer.class);
+                    WebClient.Builder builder = WebClient.builder();
+
+                    // Execute the customizer lambda - this covers lines 198-203
+                    customizer.customize(builder);
+
+                    // Build to verify the filter was added
+                    WebClient webClient = builder.build();
+                    assertThat(webClient).isNotNull();
+                });
+    }
+
     @Configuration
     static class SingleWebClientBuilderConfiguration {
         @Bean

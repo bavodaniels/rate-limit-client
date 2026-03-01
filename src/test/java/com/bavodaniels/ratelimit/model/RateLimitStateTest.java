@@ -717,4 +717,30 @@ class RateLimitStateTest {
             }
         }
     }
+
+    @Nested
+    @DisplayName("getRetryAfter() Tests")
+    class GetRetryAfterTest {
+
+        @Test
+        @DisplayName("should return retryAfter from current info")
+        void shouldReturnRetryAfter() {
+            RateLimitState state = new RateLimitState("api.example.com", "/users");
+
+            // Update with rate limit info that has retryAfter
+            Instant resetTime = Instant.now().plusSeconds(60);
+            RateLimitInfo info = new RateLimitInfo(100, 0, resetTime, 30);
+            state.updateRateLimitInfo(info);
+
+            assertEquals(30, state.getRetryAfter());
+        }
+
+        @Test
+        @DisplayName("should return 0 when no retryAfter is set")
+        void shouldReturnZeroWhenNoRetryAfter() {
+            RateLimitState state = new RateLimitState("api.example.com", "/users");
+
+            assertEquals(0, state.getRetryAfter());
+        }
+    }
 }
