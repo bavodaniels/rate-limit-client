@@ -36,6 +36,57 @@ jobs:
         id: version
         run: echo "VERSION=${GITHUB_REF#refs/tags/v}" >> $GITHUB_OUTPUT
 
+      - name: Extract coverage from JaCoCo report
+        id: coverage
+        run: |
+          COVERAGE=$(python3 -c "
+          import xml.etree.ElementTree as ET
+          tree = ET.parse('build/reports/jacoco/test/jacocoTestReport.xml')
+          root = tree.getroot()
+          counter = root.find(\".//counter[@type='LINE']\")
+          if counter is not None:
+              covered = float(counter.get('covered', 0))
+              missed = float(counter.get('missed', 0))
+              total = covered + missed
+              if total > 0:
+                  percentage = (covered / total) * 100
+                  print(f'{percentage:.1f}')
+              else:
+                  print('0.0')
+          else:
+              print('0.0')
+          ")
+          echo "COVERAGE=$COVERAGE" >> $GITHUB_OUTPUT
+
+      - name: Update README with version and coverage
+        run: |
+          VERSION="${{ steps.version.outputs.VERSION }}"
+          COVERAGE="${{ steps.coverage.outputs.COVERAGE }}"
+
+          # Update version badge
+          sed -i "s|!\[Version\](https://img.shields.io/badge/version-.*-blue.svg)|![Version](https://img.shields.io/badge/version-$VERSION-blue.svg)|g" README.md
+
+          # Update coverage badge with color based on percentage
+          if (( $(echo "$COVERAGE >= 80" | bc -l) )); then
+            COLOR="brightgreen"
+          elif (( $(echo "$COVERAGE >= 60" | bc -l) )); then
+            COLOR="green"
+          elif (( $(echo "$COVERAGE >= 40" | bc -l) )); then
+            COLOR="yellow"
+          else
+            COLOR="red"
+          fi
+
+          sed -i "s|!\[Coverage\](https://img.shields.io/badge/coverage-.*-.*\.svg)|![Coverage](https://img.shields.io/badge/coverage-${COVERAGE}%25-${COLOR}.svg)|g" README.md
+
+      - name: Commit and push README updates
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add README.md
+          git diff --staged --quiet || git commit -m "docs: Update README badges for version ${{ steps.version.outputs.VERSION }} and coverage ${{ steps.coverage.outputs.COVERAGE }}%"
+          git push origin HEAD:main
+
       - name: Find JAR file
         id: jar
         run: |
