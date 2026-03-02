@@ -32,6 +32,7 @@ A Spring Boot auto-configuration library that provides intelligent, defensive cl
 
 - **Zero Configuration**: Auto-configures rate limiting for all Spring HTTP clients
 - **Multi-Client Support**: Works seamlessly with RestTemplate, RestClient, WebClient, and @HttpExchange interfaces
+- **Multi-Bucket Support**: Tracks and respects multiple rate limit buckets (e.g., daily, hourly, per-resource limits)
 - **Industry-Standard Headers**: Supports X-RateLimit-*, RateLimit-*, Retry-After, and provider-specific formats (GitHub, Stripe)
 - **Intelligent Waiting**: Automatically waits for rate limits to reset within configurable thresholds
 - **Non-Blocking Reactive**: WebClient uses fully reactive, non-blocking delays
@@ -353,6 +354,73 @@ The library automatically detects and parses rate limit information from various
 
 The parser falls back through multiple header formats and handles both Unix timestamps and RFC 7231 HTTP-date formats.
 
+### Multi-Bucket Rate Limiting
+
+Some APIs implement multiple rate limit buckets, each tracking a different rate limit scope. For example, an API might have separate limits for:
+- **Daily limit** (e.g., 10,000,000 requests per day)
+- **Hourly limit** (e.g., 1,000 requests per hour)
+- **Per-resource limit** (e.g., 1 request per minute for operations on a specific resource)
+
+The library automatically detects and tracks all rate limit buckets present in response headers. Each bucket is identified by a unique name in the header pattern `X-RateLimit-{BucketName}-*`.
+
+#### Example Multi-Bucket Headers
+
+```
+X-RateLimit-AppDay-Limit: 10000000
+X-RateLimit-AppDay-Remaining: 9999999
+X-RateLimit-AppDay-Reset: 1735689600
+
+X-RateLimit-Session-Limit: 120
+X-RateLimit-Session-Remaining: 75
+X-RateLimit-Session-Reset: 1735689600
+
+X-RateLimit-SessionOrders-Limit: 1
+X-RateLimit-SessionOrders-Remaining: 0  # ← Most restrictive bucket
+X-RateLimit-SessionOrders-Reset: 1735689660
+```
+
+#### How It Works
+
+When multiple buckets are present:
+- **Request is allowed only if ALL buckets have capacity**
+- **Request is blocked if ANY bucket is exceeded**
+- **Wait time is the MAXIMUM across all buckets**
+
+In the example above, the request would be blocked because the `SessionOrders` bucket has 0 remaining requests, even though `AppDay` and `Session` buckets have capacity.
+
+#### Accessing Bucket Information
+
+```java
+RateLimitState state = tracker.getState("api.example.com");
+
+// Check if any bucket is exceeded
+if (state.isLimitExceeded()) {
+    // Handle rate limit
+}
+
+// Get bucket-specific information
+RateLimitInfo orders = state.getBucketInfo("SessionOrders");
+System.out.println("Orders bucket: " + orders.remaining() + "/" + orders.limit());
+
+// Find the most restrictive bucket
+String restrictiveBucket = state.getMostRestrictiveBucket();
+
+// Get all tracked buckets
+Set<String> buckets = state.getAllBuckets();
+```
+
+#### Legacy Single-Bucket Headers
+
+For backwards compatibility, legacy single-bucket headers are automatically mapped to a "default" bucket:
+
+```
+X-RateLimit-Limit: 1000
+X-RateLimit-Remaining: 500
+X-RateLimit-Reset: 1735689600
+
+// Accessible as: state.getBucketInfo("default")
+```
+
 ## Configuration Properties Reference
 
 All configuration properties with their defaults:
@@ -575,6 +643,10 @@ A: Absolutely! Implement `RateLimitTracker` and register it as a bean. The libra
 **Q: What happens if an API doesn't send rate limit headers?**
 
 A: Requests proceed normally. Rate limiting only activates when headers are detected.
+
+**Q: How does multi-bucket rate limiting work?**
+
+A: When an API provides multiple rate limit buckets (e.g., daily, hourly, per-resource), the library tracks all of them simultaneously. A request is allowed only if ALL buckets have capacity. If ANY bucket is exceeded, the request is blocked. The wait time used is the MAXIMUM wait across all exceeded buckets. This ensures compliance with the most restrictive limit.
 
 ## Contributing
 

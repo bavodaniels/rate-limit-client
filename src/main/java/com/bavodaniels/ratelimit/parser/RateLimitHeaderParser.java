@@ -25,6 +25,23 @@ import java.util.regex.Pattern;
  *   <li>Provider-specific formats (GitHub, Twitter/X, Stripe)</li>
  * </ul>
  *
+ * <p>Also supports multi-bucket rate limiting where APIs provide multiple rate limits
+ * (e.g., daily limit, hourly limit, per-resource limit). Multi-bucket headers use the pattern:
+ * {@code X-RateLimit-{BucketName}-Limit}, {@code X-RateLimit-{BucketName}-Remaining},
+ * {@code X-RateLimit-{BucketName}-Reset}.</p>
+ *
+ * <p>Example multi-bucket headers:
+ * <pre>
+ * X-RateLimit-AppDay-Limit: 10000000
+ * X-RateLimit-AppDay-Remaining: 9999999
+ * X-RateLimit-AppDay-Reset: 1735689600
+ *
+ * X-RateLimit-Session-Limit: 120
+ * X-RateLimit-Session-Remaining: 75
+ * X-RateLimit-Session-Reset: 1735689600
+ * </pre>
+ * </p>
+ *
  * @since 1.0.0
  */
 public class RateLimitHeaderParser {

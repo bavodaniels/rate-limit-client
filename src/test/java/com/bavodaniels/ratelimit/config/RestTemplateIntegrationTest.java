@@ -699,4 +699,107 @@ class RestTemplateIntegrationTest {
                     assertThat(elapsedTime).isGreaterThanOrEqualTo(900);
                 });
     }
+
+    @Test
+    void restTemplateShouldBlockWhenAnyMultiBucketExceeded() {
+        contextRunner
+                .withUserConfiguration(RestTemplateTestConfig.class)
+                .withPropertyValues("rate-limit.max-wait-time-millis=5000")
+                .run(context -> {
+                    RestTemplate restTemplate = context.getBean(RestTemplate.class);
+                    RateLimitTracker tracker = context.getBean(RateLimitTracker.class);
+                    RestTemplateTestConfig.MockRequestFactory factory =
+                            (RestTemplateTestConfig.MockRequestFactory) context.getBean(ClientHttpRequestFactory.class);
+
+                    // Configure response with multiple buckets where SessionOrders is exceeded
+                    RestTemplateTestConfig.MockResponseConfig config = new RestTemplateTestConfig.MockResponseConfig();
+                    config.headers = new HttpHeaders();
+                    config.headers.set("X-RateLimit-AppDay-Limit", "10000000");
+                    config.headers.set("X-RateLimit-AppDay-Remaining", "9999999");
+                    config.headers.set("X-RateLimit-AppDay-Reset", String.valueOf(Instant.now().plusSeconds(86400).getEpochSecond()));
+                    config.headers.set("X-RateLimit-Session-Limit", "120");
+                    config.headers.set("X-RateLimit-Session-Remaining", "75");
+                    config.headers.set("X-RateLimit-Session-Reset", String.valueOf(Instant.now().plusSeconds(3600).getEpochSecond()));
+                    config.headers.set("X-RateLimit-SessionOrders-Limit", "1");
+                    config.headers.set("X-RateLimit-SessionOrders-Remaining", "0"); // ← This bucket is exceeded
+                    config.headers.set("X-RateLimit-SessionOrders-Reset", String.valueOf(Instant.now().plusSeconds(2).getEpochSecond()));
+                    factory.setResponseConfig(config);
+
+                    // First request populates the state
+                    restTemplate.getForObject("http://api.example.com/orders", String.class);
+
+                    RateLimitState state = tracker.getState("api.example.com");
+
+                    // Verify all buckets are tracked
+                    assertThat(state.getAllBuckets()).containsExactlyInAnyOrder("AppDay", "Session", "SessionOrders");
+
+                    // Verify AppDay bucket (not exceeded)
+                    assertThat(state.getBucketInfo("AppDay").remaining()).isEqualTo(9999999);
+                    assertThat(state.getBucketInfo("AppDay").isLimitExceeded()).isFalse();
+
+                    // Verify Session bucket (not exceeded)
+                    assertThat(state.getBucketInfo("Session").remaining()).isEqualTo(75);
+                    assertThat(state.getBucketInfo("Session").isLimitExceeded()).isFalse();
+
+                    // Verify SessionOrders bucket (exceeded)
+                    assertThat(state.getBucketInfo("SessionOrders").remaining()).isEqualTo(0);
+                    assertThat(state.getBucketInfo("SessionOrders").isLimitExceeded()).isTrue();
+
+                    // Overall state should indicate request is blocked
+                    assertThat(state.isLimitExceeded()).isTrue();
+                    assertThat(state.canMakeRequest(Instant.now())).isFalse();
+
+                    // Second request should block due to SessionOrders bucket
+                    long startTime = System.currentTimeMillis();
+                    String result = restTemplate.getForObject("http://api.example.com/orders", String.class);
+                    long elapsedTime = System.currentTimeMillis() - startTime;
+
+                    assertThat(result).isEqualTo("OK");
+                    assertThat(elapsedTime).isGreaterThanOrEqualTo(1900); // Should wait approximately 2 seconds
+                });
+    }
+
+    @Test
+    void restTemplateShouldAllowWhenAllMultiBucketsHaveCapacity() {
+        contextRunner
+                .withUserConfiguration(RestTemplateTestConfig.class)
+                .run(context -> {
+                    RestTemplate restTemplate = context.getBean(RestTemplate.class);
+                    RateLimitTracker tracker = context.getBean(RateLimitTracker.class);
+                    RestTemplateTestConfig.MockRequestFactory factory =
+                            (RestTemplateTestConfig.MockRequestFactory) context.getBean(ClientHttpRequestFactory.class);
+
+                    // Configure response with multiple buckets, all with capacity
+                    RestTemplateTestConfig.MockResponseConfig config = new RestTemplateTestConfig.MockResponseConfig();
+                    config.headers = new HttpHeaders();
+                    config.headers.set("X-RateLimit-AppDay-Limit", "10000000");
+                    config.headers.set("X-RateLimit-AppDay-Remaining", "9999999");
+                    config.headers.set("X-RateLimit-AppDay-Reset", String.valueOf(Instant.now().plusSeconds(86400).getEpochSecond()));
+                    config.headers.set("X-RateLimit-Session-Limit", "120");
+                    config.headers.set("X-RateLimit-Session-Remaining", "75");
+                    config.headers.set("X-RateLimit-Session-Reset", String.valueOf(Instant.now().plusSeconds(3600).getEpochSecond()));
+                    factory.setResponseConfig(config);
+
+                    // First request
+                    restTemplate.getForObject("http://api.example.com/data", String.class);
+
+                    RateLimitState state = tracker.getState("api.example.com");
+
+                    // Verify all buckets are tracked
+                    assertThat(state.getAllBuckets()).containsExactlyInAnyOrder("AppDay", "Session");
+
+                    // Overall state should allow requests
+                    assertThat(state.isLimitExceeded()).isFalse();
+                    assertThat(state.canMakeRequest(Instant.now())).isTrue();
+                    assertThat(state.getWaitTimeSeconds(Instant.now())).isEqualTo(0);
+
+                    // Second request should succeed without waiting
+                    long startTime = System.currentTimeMillis();
+                    String result = restTemplate.getForObject("http://api.example.com/data", String.class);
+                    long elapsedTime = System.currentTimeMillis() - startTime;
+
+                    assertThat(result).isEqualTo("OK");
+                    assertThat(elapsedTime).isLessThan(100); // Should not wait
+                });
+    }
 }

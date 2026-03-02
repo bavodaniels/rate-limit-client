@@ -13,10 +13,32 @@ import java.util.concurrent.locks.ReentrantReadWriteLock;
  * Thread-safe mutable state holder for tracking rate limit information for a specific host and endpoint.
  * Manages the current rate limit status and provides methods to query and update the state.
  *
- * <p>Supports multiple rate limit buckets (e.g., per-resource, per-operation) as well as single-bucket
- * configurations for backwards compatibility.</p>
+ * <p>Supports multiple rate limit buckets (e.g., daily limit, hourly limit, per-resource limit)
+ * as well as single-bucket configurations for backwards compatibility.</p>
+ *
+ * <h2>Multi-Bucket Rate Limiting Behavior</h2>
+ * <p>When multiple buckets are tracked:
+ * <ul>
+ *   <li>{@link #canMakeRequest(Instant)} returns true only if ALL buckets allow the request</li>
+ *   <li>{@link #isLimitExceeded()} returns true if ANY bucket is exceeded</li>
+ *   <li>{@link #getWaitTimeSeconds(Instant)} returns the MAXIMUM wait time across all buckets</li>
+ *   <li>For backwards compatibility, {@link #getCurrentInfo()} returns the most restrictive bucket</li>
+ * </ul>
+ * </p>
  *
  * <p>This class is thread-safe through the use of a ReadWriteLock.</p>
+ *
+ * <p>Example usage with multi-bucket:
+ * <pre>
+ * RateLimitState state = tracker.getState("api.example.com");
+ * if (state.isLimitExceeded()) {
+ *     long waitSeconds = state.getWaitTimeSeconds(Instant.now());
+ *     Thread.sleep(waitSeconds * 1000);
+ * }
+ * RateLimitInfo orders = state.getBucketInfo("SessionOrders");
+ * System.out.println("Orders remaining: " + orders.remaining());
+ * </pre>
+ * </p>
  *
  * @since 1.0.0
  */

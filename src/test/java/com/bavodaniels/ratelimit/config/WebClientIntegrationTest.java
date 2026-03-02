@@ -1,6 +1,7 @@
 package com.bavodaniels.ratelimit.config;
 
 import com.bavodaniels.ratelimit.exception.RateLimitExceededException;
+import com.bavodaniels.ratelimit.model.RateLimitState;
 import com.bavodaniels.ratelimit.tracker.RateLimitTracker;
 import okhttp3.mockwebserver.MockResponse;
 import okhttp3.mockwebserver.MockWebServer;
@@ -729,6 +730,90 @@ class WebClientIntegrationTest {
             StepVerifier.create(delayedRequest)
                     .expectNext("success after reset")
                     .verifyComplete();
+        });
+    }
+
+    @Test
+    void webClientShouldBlockWhenAnyMultiBucketExceeded() {
+        contextRunner.run(context -> {
+            WebClient.Builder builder = context.getBean(WebClient.Builder.class);
+            RateLimitTracker tracker = context.getBean(RateLimitTracker.class);
+            String host = mockWebServer.getHostName() + ":" + mockWebServer.getPort();
+
+            WebClient client = builder.baseUrl(baseUrl).build();
+
+            // First request with multiple buckets where SessionOrders is exceeded
+            mockWebServer.enqueue(new MockResponse()
+                    .setResponseCode(429)
+                    .addHeader("X-RateLimit-AppDay-Limit", "10000000")
+                    .addHeader("X-RateLimit-AppDay-Remaining", "9999999")
+                    .addHeader("X-RateLimit-AppDay-Reset", String.valueOf(Instant.now().plusSeconds(86400).getEpochSecond()))
+                    .addHeader("X-RateLimit-Session-Limit", "120")
+                    .addHeader("X-RateLimit-Session-Remaining", "75")
+                    .addHeader("X-RateLimit-Session-Reset", String.valueOf(Instant.now().plusSeconds(3600).getEpochSecond()))
+                    .addHeader("X-RateLimit-SessionOrders-Limit", "1")
+                    .addHeader("X-RateLimit-SessionOrders-Remaining", "0")
+                    .addHeader("X-RateLimit-SessionOrders-Reset", String.valueOf(Instant.now().plusSeconds(60).getEpochSecond()))
+                    .setBody("Too many requests"));
+
+            Mono<String> firstRequest = client.get()
+                    .uri("/orders")
+                    .retrieve()
+                    .bodyToMono(String.class)
+                    .onErrorResume(e -> Mono.just("error"));
+
+            StepVerifier.create(firstRequest)
+                    .expectNext("error")
+                    .verifyComplete();
+
+            RateLimitState state = tracker.getState(host);
+
+            // Verify all buckets are tracked
+            assertThat(state.getAllBuckets()).containsExactlyInAnyOrder("AppDay", "Session", "SessionOrders");
+
+            // Verify SessionOrders bucket is exceeded
+            assertThat(state.getBucketInfo("SessionOrders").isLimitExceeded()).isTrue();
+            assertThat(state.isLimitExceeded()).isTrue();
+        });
+    }
+
+    @Test
+    void webClientShouldAllowWhenAllMultiBucketsHaveCapacity() {
+        contextRunner.run(context -> {
+            WebClient.Builder builder = context.getBean(WebClient.Builder.class);
+            RateLimitTracker tracker = context.getBean(RateLimitTracker.class);
+            String host = mockWebServer.getHostName() + ":" + mockWebServer.getPort();
+
+            WebClient client = builder.baseUrl(baseUrl).build();
+
+            // Response with multiple buckets, all with capacity
+            mockWebServer.enqueue(new MockResponse()
+                    .setResponseCode(200)
+                    .addHeader("X-RateLimit-AppDay-Limit", "10000000")
+                    .addHeader("X-RateLimit-AppDay-Remaining", "9999999")
+                    .addHeader("X-RateLimit-AppDay-Reset", String.valueOf(Instant.now().plusSeconds(86400).getEpochSecond()))
+                    .addHeader("X-RateLimit-Session-Limit", "120")
+                    .addHeader("X-RateLimit-Session-Remaining", "75")
+                    .addHeader("X-RateLimit-Session-Reset", String.valueOf(Instant.now().plusSeconds(3600).getEpochSecond()))
+                    .setBody("success"));
+
+            Mono<String> request = client.get()
+                    .uri("/data")
+                    .retrieve()
+                    .bodyToMono(String.class);
+
+            StepVerifier.create(request)
+                    .expectNext("success")
+                    .verifyComplete();
+
+            RateLimitState state = tracker.getState(host);
+
+            // Verify all buckets are tracked
+            assertThat(state.getAllBuckets()).containsExactlyInAnyOrder("AppDay", "Session");
+
+            // Verify state allows requests
+            assertThat(state.isLimitExceeded()).isFalse();
+            assertThat(state.canMakeRequest(Instant.now())).isTrue();
         });
     }
 }
