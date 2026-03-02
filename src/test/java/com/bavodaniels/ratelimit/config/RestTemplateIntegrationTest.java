@@ -714,15 +714,16 @@ class RestTemplateIntegrationTest {
                     // Configure response with multiple buckets where SessionOrders is exceeded
                     RestTemplateTestConfig.MockResponseConfig config = new RestTemplateTestConfig.MockResponseConfig();
                     config.headers = new HttpHeaders();
+                    Instant now = Instant.now();
                     config.headers.set("X-RateLimit-AppDay-Limit", "10000000");
                     config.headers.set("X-RateLimit-AppDay-Remaining", "9999999");
-                    config.headers.set("X-RateLimit-AppDay-Reset", String.valueOf(Instant.now().plusSeconds(86400).getEpochSecond()));
+                    config.headers.set("X-RateLimit-AppDay-Reset", String.valueOf(now.plusSeconds(86400).getEpochSecond()));
                     config.headers.set("X-RateLimit-Session-Limit", "120");
                     config.headers.set("X-RateLimit-Session-Remaining", "75");
-                    config.headers.set("X-RateLimit-Session-Reset", String.valueOf(Instant.now().plusSeconds(3600).getEpochSecond()));
+                    config.headers.set("X-RateLimit-Session-Reset", String.valueOf(now.plusSeconds(3600).getEpochSecond()));
                     config.headers.set("X-RateLimit-SessionOrders-Limit", "1");
                     config.headers.set("X-RateLimit-SessionOrders-Remaining", "0"); // ← This bucket is exceeded
-                    config.headers.set("X-RateLimit-SessionOrders-Reset", String.valueOf(Instant.now().plusSeconds(2).getEpochSecond()));
+                    config.headers.set("X-RateLimit-SessionOrders-Reset", String.valueOf(now.plusSeconds(2).getEpochSecond()));
                     factory.setResponseConfig(config);
 
                     // First request populates the state
@@ -733,17 +734,22 @@ class RestTemplateIntegrationTest {
                     // Verify all buckets are tracked
                     assertThat(state.getAllBuckets()).containsExactlyInAnyOrder("AppDay", "Session", "SessionOrders");
 
+                    // Cache bucket info to avoid repeated lookups
+                    var appDayBucket = state.getBucketInfo("AppDay");
+                    var sessionBucket = state.getBucketInfo("Session");
+                    var ordersBucket = state.getBucketInfo("SessionOrders");
+
                     // Verify AppDay bucket (not exceeded)
-                    assertThat(state.getBucketInfo("AppDay").remaining()).isEqualTo(9999999);
-                    assertThat(state.getBucketInfo("AppDay").isLimitExceeded()).isFalse();
+                    assertThat(appDayBucket.remaining()).isEqualTo(9999999);
+                    assertThat(appDayBucket.isLimitExceeded()).isFalse();
 
                     // Verify Session bucket (not exceeded)
-                    assertThat(state.getBucketInfo("Session").remaining()).isEqualTo(75);
-                    assertThat(state.getBucketInfo("Session").isLimitExceeded()).isFalse();
+                    assertThat(sessionBucket.remaining()).isEqualTo(75);
+                    assertThat(sessionBucket.isLimitExceeded()).isFalse();
 
                     // Verify SessionOrders bucket (exceeded)
-                    assertThat(state.getBucketInfo("SessionOrders").remaining()).isEqualTo(0);
-                    assertThat(state.getBucketInfo("SessionOrders").isLimitExceeded()).isTrue();
+                    assertThat(ordersBucket.remaining()).isEqualTo(0);
+                    assertThat(ordersBucket.isLimitExceeded()).isTrue();
 
                     // Overall state should indicate request is blocked
                     assertThat(state.isLimitExceeded()).isTrue();
@@ -772,12 +778,13 @@ class RestTemplateIntegrationTest {
                     // Configure response with multiple buckets, all with capacity
                     RestTemplateTestConfig.MockResponseConfig config = new RestTemplateTestConfig.MockResponseConfig();
                     config.headers = new HttpHeaders();
+                    Instant now = Instant.now();
                     config.headers.set("X-RateLimit-AppDay-Limit", "10000000");
                     config.headers.set("X-RateLimit-AppDay-Remaining", "9999999");
-                    config.headers.set("X-RateLimit-AppDay-Reset", String.valueOf(Instant.now().plusSeconds(86400).getEpochSecond()));
+                    config.headers.set("X-RateLimit-AppDay-Reset", String.valueOf(now.plusSeconds(86400).getEpochSecond()));
                     config.headers.set("X-RateLimit-Session-Limit", "120");
                     config.headers.set("X-RateLimit-Session-Remaining", "75");
-                    config.headers.set("X-RateLimit-Session-Reset", String.valueOf(Instant.now().plusSeconds(3600).getEpochSecond()));
+                    config.headers.set("X-RateLimit-Session-Reset", String.valueOf(now.plusSeconds(3600).getEpochSecond()));
                     factory.setResponseConfig(config);
 
                     // First request

@@ -69,6 +69,14 @@ class WebClientIntegrationTest {
     }
 
     /**
+     * Helper method to get the host identifier from MockWebServer.
+     * Extracts the pattern: "hostname:port"
+     */
+    private String getMockServerHost() {
+        return mockWebServer.getHostName() + ":" + mockWebServer.getPort();
+    }
+
+    /**
      * Test 1: Reactive Happy Path - Non-blocking request with rate limit headers
      * Verifies that WebClient handles successful requests and updates rate limit state.
      */
@@ -738,22 +746,23 @@ class WebClientIntegrationTest {
         contextRunner.run(context -> {
             WebClient.Builder builder = context.getBean(WebClient.Builder.class);
             RateLimitTracker tracker = context.getBean(RateLimitTracker.class);
-            String host = mockWebServer.getHostName() + ":" + mockWebServer.getPort();
+            String host = getMockServerHost();
 
             WebClient client = builder.baseUrl(baseUrl).build();
 
             // First request with multiple buckets where SessionOrders is exceeded
+            Instant now = Instant.now();
             mockWebServer.enqueue(new MockResponse()
                     .setResponseCode(429)
                     .addHeader("X-RateLimit-AppDay-Limit", "10000000")
                     .addHeader("X-RateLimit-AppDay-Remaining", "9999999")
-                    .addHeader("X-RateLimit-AppDay-Reset", String.valueOf(Instant.now().plusSeconds(86400).getEpochSecond()))
+                    .addHeader("X-RateLimit-AppDay-Reset", String.valueOf(now.plusSeconds(86400).getEpochSecond()))
                     .addHeader("X-RateLimit-Session-Limit", "120")
                     .addHeader("X-RateLimit-Session-Remaining", "75")
-                    .addHeader("X-RateLimit-Session-Reset", String.valueOf(Instant.now().plusSeconds(3600).getEpochSecond()))
+                    .addHeader("X-RateLimit-Session-Reset", String.valueOf(now.plusSeconds(3600).getEpochSecond()))
                     .addHeader("X-RateLimit-SessionOrders-Limit", "1")
                     .addHeader("X-RateLimit-SessionOrders-Remaining", "0")
-                    .addHeader("X-RateLimit-SessionOrders-Reset", String.valueOf(Instant.now().plusSeconds(60).getEpochSecond()))
+                    .addHeader("X-RateLimit-SessionOrders-Reset", String.valueOf(now.plusSeconds(60).getEpochSecond()))
                     .setBody("Too many requests"));
 
             Mono<String> firstRequest = client.get()
@@ -782,19 +791,20 @@ class WebClientIntegrationTest {
         contextRunner.run(context -> {
             WebClient.Builder builder = context.getBean(WebClient.Builder.class);
             RateLimitTracker tracker = context.getBean(RateLimitTracker.class);
-            String host = mockWebServer.getHostName() + ":" + mockWebServer.getPort();
+            String host = getMockServerHost();
 
             WebClient client = builder.baseUrl(baseUrl).build();
 
             // Response with multiple buckets, all with capacity
+            Instant now = Instant.now();
             mockWebServer.enqueue(new MockResponse()
                     .setResponseCode(200)
                     .addHeader("X-RateLimit-AppDay-Limit", "10000000")
                     .addHeader("X-RateLimit-AppDay-Remaining", "9999999")
-                    .addHeader("X-RateLimit-AppDay-Reset", String.valueOf(Instant.now().plusSeconds(86400).getEpochSecond()))
+                    .addHeader("X-RateLimit-AppDay-Reset", String.valueOf(now.plusSeconds(86400).getEpochSecond()))
                     .addHeader("X-RateLimit-Session-Limit", "120")
                     .addHeader("X-RateLimit-Session-Remaining", "75")
-                    .addHeader("X-RateLimit-Session-Reset", String.valueOf(Instant.now().plusSeconds(3600).getEpochSecond()))
+                    .addHeader("X-RateLimit-Session-Reset", String.valueOf(now.plusSeconds(3600).getEpochSecond()))
                     .setBody("success"));
 
             Mono<String> request = client.get()
