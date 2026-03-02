@@ -7,7 +7,9 @@ import org.junit.jupiter.api.RepeatedTest;
 
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -150,7 +152,7 @@ class RateLimitStateTest {
             RateLimitState state = new RateLimitState("api.example.com", "/users");
             assertThrows(
                 NullPointerException.class,
-                () -> state.updateRateLimitInfo(null)
+                () -> state.updateRateLimitInfo((RateLimitInfo) null)
             );
         }
 
@@ -427,7 +429,8 @@ class RateLimitStateTest {
 
             assertEquals("api.example.com", snapshot.host());
             assertEquals("/users", snapshot.endpoint());
-            assertEquals(info, snapshot.info());
+            assertEquals(1, snapshot.buckets().size());
+            assertEquals(info, snapshot.buckets().get("default"));
             assertEquals(updateTime, snapshot.lastUpdated());
         }
 
@@ -443,7 +446,7 @@ class RateLimitStateTest {
             RateLimitInfo info2 = new RateLimitInfo(100, 25, Instant.now(), 0);
             state.updateRateLimitInfo(info2);
 
-            assertEquals(info1, snapshot.info());
+            assertEquals(info1, snapshot.buckets().get("default"));
             assertEquals(info2, state.getCurrentInfo());
         }
 
@@ -452,11 +455,11 @@ class RateLimitStateTest {
         void shouldValidateSnapshotConstructor() {
             assertThrows(
                 NullPointerException.class,
-                () -> new RateLimitState.StateSnapshot(null, "/users", RateLimitInfo.empty(), Instant.now())
+                () -> new RateLimitState.StateSnapshot(null, "/users", Map.of(), Instant.now())
             );
             assertThrows(
                 NullPointerException.class,
-                () -> new RateLimitState.StateSnapshot("host", null, RateLimitInfo.empty(), Instant.now())
+                () -> new RateLimitState.StateSnapshot("host", null, Map.of(), Instant.now())
             );
             assertThrows(
                 NullPointerException.class,
@@ -464,7 +467,7 @@ class RateLimitStateTest {
             );
             assertThrows(
                 NullPointerException.class,
-                () -> new RateLimitState.StateSnapshot("host", "/users", RateLimitInfo.empty(), null)
+                () -> new RateLimitState.StateSnapshot("host", "/users", Map.of(), null)
             );
         }
     }
@@ -741,6 +744,246 @@ class RateLimitStateTest {
             RateLimitState state = new RateLimitState("api.example.com", "/users");
 
             assertEquals(0, state.getRetryAfter());
+        }
+    }
+
+    @Nested
+    @DisplayName("Multi-Bucket Support")
+    class MultiBucketSupport {
+
+        @Test
+        @DisplayName("should update multiple buckets at once")
+        void shouldUpdateMultipleBuckets() {
+            RateLimitState state = new RateLimitState("api.example.com", "/users");
+            Instant now = Instant.now();
+
+            Map<String, RateLimitInfo> buckets = new HashMap<>();
+            buckets.put("search", new RateLimitInfo(100, 50, now.plusSeconds(3600), 0));
+            buckets.put("core", new RateLimitInfo(5000, 4500, now.plusSeconds(3600), 0));
+            buckets.put("graphql", new RateLimitInfo(1000, 800, now.plusSeconds(3600), 0));
+
+            state.updateRateLimitInfo(buckets);
+
+            assertEquals(3, state.getAllBuckets().size());
+            assertTrue(state.getAllBuckets().contains("search"));
+            assertTrue(state.getAllBuckets().contains("core"));
+            assertTrue(state.getAllBuckets().contains("graphql"));
+        }
+
+        @Test
+        @DisplayName("should get bucket-specific info")
+        void shouldGetBucketSpecificInfo() {
+            RateLimitState state = new RateLimitState("api.example.com", "/users");
+            Instant now = Instant.now();
+
+            RateLimitInfo searchInfo = new RateLimitInfo(100, 50, now.plusSeconds(3600), 0);
+            RateLimitInfo coreInfo = new RateLimitInfo(5000, 4500, now.plusSeconds(3600), 0);
+
+            Map<String, RateLimitInfo> buckets = new HashMap<>();
+            buckets.put("search", searchInfo);
+            buckets.put("core", coreInfo);
+
+            state.updateRateLimitInfo(buckets);
+
+            assertEquals(searchInfo, state.getBucketInfo("search"));
+            assertEquals(coreInfo, state.getBucketInfo("core"));
+            assertEquals(RateLimitInfo.empty(), state.getBucketInfo("nonexistent"));
+        }
+
+        @Test
+        @DisplayName("canMakeRequest should return false if ANY bucket is exceeded")
+        void canMakeRequestReturnsFalseIfAnyBucketExceeded() {
+            RateLimitState state = new RateLimitState("api.example.com", "/users");
+            Instant now = Instant.now();
+
+            Map<String, RateLimitInfo> buckets = new HashMap<>();
+            buckets.put("search", new RateLimitInfo(100, 0, now.plusSeconds(3600), 0)); // Exceeded
+            buckets.put("core", new RateLimitInfo(5000, 4500, now.plusSeconds(3600), 0)); // Not exceeded
+
+            state.updateRateLimitInfo(buckets);
+
+            assertFalse(state.canMakeRequest(now));
+        }
+
+        @Test
+        @DisplayName("canMakeRequest should return true if ALL buckets allow requests")
+        void canMakeRequestReturnsTrueIfAllBucketsAllow() {
+            RateLimitState state = new RateLimitState("api.example.com", "/users");
+            Instant now = Instant.now();
+
+            Map<String, RateLimitInfo> buckets = new HashMap<>();
+            buckets.put("search", new RateLimitInfo(100, 50, now.plusSeconds(3600), 0));
+            buckets.put("core", new RateLimitInfo(5000, 4500, now.plusSeconds(3600), 0));
+
+            state.updateRateLimitInfo(buckets);
+
+            assertTrue(state.canMakeRequest(now));
+        }
+
+        @Test
+        @DisplayName("isLimitExceeded should return true if ANY bucket is exceeded")
+        void isLimitExceededReturnsTrueIfAnyBucketExceeded() {
+            RateLimitState state = new RateLimitState("api.example.com", "/users");
+            Instant now = Instant.now();
+
+            Map<String, RateLimitInfo> buckets = new HashMap<>();
+            buckets.put("search", new RateLimitInfo(100, 0, now.plusSeconds(3600), 0)); // Exceeded
+            buckets.put("core", new RateLimitInfo(5000, 4500, now.plusSeconds(3600), 0)); // Not exceeded
+
+            state.updateRateLimitInfo(buckets);
+
+            assertTrue(state.isLimitExceeded());
+        }
+
+        @Test
+        @DisplayName("getWaitTimeSeconds should return MAX wait time across all buckets")
+        void getWaitTimeSecondsReturnsMaxWaitTime() {
+            RateLimitState state = new RateLimitState("api.example.com", "/users");
+            Instant now = Instant.now();
+
+            Map<String, RateLimitInfo> buckets = new HashMap<>();
+            buckets.put("search", new RateLimitInfo(100, 0, now.plusSeconds(1800), 0)); // 30 min wait
+            buckets.put("core", new RateLimitInfo(5000, 0, now.plusSeconds(3600), 0));  // 60 min wait
+
+            state.updateRateLimitInfo(buckets);
+
+            assertEquals(3600, state.getWaitTimeSeconds(now));
+        }
+
+        @Test
+        @DisplayName("getMostRestrictiveBucket should return bucket with longest wait time")
+        void getMostRestrictiveBucketReturnsCorrectBucket() {
+            RateLimitState state = new RateLimitState("api.example.com", "/users");
+            Instant now = Instant.now();
+
+            Map<String, RateLimitInfo> buckets = new HashMap<>();
+            buckets.put("search", new RateLimitInfo(100, 0, now.plusSeconds(1800), 0));
+            buckets.put("core", new RateLimitInfo(5000, 0, now.plusSeconds(3600), 0)); // Most restrictive
+
+            state.updateRateLimitInfo(buckets);
+
+            assertEquals("core", state.getMostRestrictiveBucket());
+        }
+
+        @Test
+        @DisplayName("getMostRestrictiveBucket should consider remaining ratio for non-exceeded buckets")
+        void getMostRestrictiveBucketConsidersRemainingRatio() {
+            RateLimitState state = new RateLimitState("api.example.com", "/users");
+            Instant now = Instant.now();
+
+            Map<String, RateLimitInfo> buckets = new HashMap<>();
+            buckets.put("search", new RateLimitInfo(100, 10, now.plusSeconds(3600), 0)); // 10% remaining
+            buckets.put("core", new RateLimitInfo(5000, 2500, now.plusSeconds(3600), 0)); // 50% remaining
+
+            state.updateRateLimitInfo(buckets);
+
+            // search bucket is more restrictive (lower remaining percentage)
+            assertEquals("search", state.getMostRestrictiveBucket());
+        }
+
+        @Test
+        @DisplayName("getCurrentInfo should return most restrictive bucket")
+        void getCurrentInfoReturnsMostRestrictiveBucket() {
+            RateLimitState state = new RateLimitState("api.example.com", "/users");
+            Instant now = Instant.now();
+
+            RateLimitInfo searchInfo = new RateLimitInfo(100, 10, now.plusSeconds(3600), 0);
+            RateLimitInfo coreInfo = new RateLimitInfo(5000, 2500, now.plusSeconds(3600), 0);
+
+            Map<String, RateLimitInfo> buckets = new HashMap<>();
+            buckets.put("search", searchInfo);
+            buckets.put("core", coreInfo);
+
+            state.updateRateLimitInfo(buckets);
+
+            // search is more restrictive (10% vs 50% remaining)
+            assertEquals(searchInfo, state.getCurrentInfo());
+        }
+
+        @Test
+        @DisplayName("should handle empty buckets map")
+        void shouldHandleEmptyBucketsMap() {
+            RateLimitState state = new RateLimitState("api.example.com", "/users");
+
+            state.updateRateLimitInfo(Map.of());
+
+            assertEquals(0, state.getAllBuckets().size());
+            assertEquals(RateLimitInfo.empty(), state.getCurrentInfo());
+            assertTrue(state.canMakeRequest(Instant.now()));
+        }
+
+        @Test
+        @DisplayName("should throw NullPointerException when buckets map is null")
+        void shouldThrowWhenBucketsMapIsNull() {
+            RateLimitState state = new RateLimitState("api.example.com", "/users");
+
+            assertThrows(
+                NullPointerException.class,
+                () -> state.updateRateLimitInfo((Map<String, RateLimitInfo>) null)
+            );
+        }
+
+        @Test
+        @DisplayName("should throw NullPointerException when bucket name is null in getBucketInfo")
+        void shouldThrowWhenBucketNameIsNull() {
+            RateLimitState state = new RateLimitState("api.example.com", "/users");
+
+            assertThrows(
+                NullPointerException.class,
+                () -> state.getBucketInfo(null)
+            );
+        }
+
+        @Test
+        @DisplayName("should prioritize exceeded buckets over non-exceeded buckets")
+        void shouldPrioritizeExceededBuckets() {
+            RateLimitState state = new RateLimitState("api.example.com", "/users");
+            Instant now = Instant.now();
+
+            Map<String, RateLimitInfo> buckets = new HashMap<>();
+            buckets.put("search", new RateLimitInfo(100, 0, now.plusSeconds(1800), 0)); // Exceeded
+            buckets.put("core", new RateLimitInfo(5000, 10, now.plusSeconds(3600), 0)); // Not exceeded
+
+            state.updateRateLimitInfo(buckets);
+
+            // Exceeded bucket should be most restrictive
+            assertEquals("search", state.getMostRestrictiveBucket());
+        }
+
+        @Test
+        @DisplayName("snapshot should include all buckets")
+        void snapshotShouldIncludeAllBuckets() {
+            RateLimitState state = new RateLimitState("api.example.com", "/users");
+            Instant now = Instant.now();
+
+            Map<String, RateLimitInfo> buckets = new HashMap<>();
+            buckets.put("search", new RateLimitInfo(100, 50, now.plusSeconds(3600), 0));
+            buckets.put("core", new RateLimitInfo(5000, 4500, now.plusSeconds(3600), 0));
+
+            state.updateRateLimitInfo(buckets);
+
+            RateLimitState.StateSnapshot snapshot = state.snapshot();
+
+            assertEquals(2, snapshot.buckets().size());
+            assertTrue(snapshot.buckets().containsKey("search"));
+            assertTrue(snapshot.buckets().containsKey("core"));
+        }
+
+        @Test
+        @DisplayName("reset should clear all buckets")
+        void resetShouldClearAllBuckets() {
+            RateLimitState state = new RateLimitState("api.example.com", "/users");
+            Instant now = Instant.now();
+
+            Map<String, RateLimitInfo> buckets = new HashMap<>();
+            buckets.put("search", new RateLimitInfo(100, 50, now.plusSeconds(3600), 0));
+            buckets.put("core", new RateLimitInfo(5000, 4500, now.plusSeconds(3600), 0));
+
+            state.updateRateLimitInfo(buckets);
+            state.reset();
+
+            assertEquals(0, state.getAllBuckets().size());
+            assertEquals(RateLimitInfo.empty(), state.getCurrentInfo());
         }
     }
 }

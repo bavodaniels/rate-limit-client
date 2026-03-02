@@ -1,5 +1,6 @@
 package com.bavodaniels.ratelimit.parser;
 
+import com.bavodaniels.ratelimit.model.RateLimitInfo;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
@@ -37,6 +38,29 @@ class RateLimitHeaderParserTest {
                 }
             }
             return null;
+        };
+    }
+
+    /**
+     * Creates an AllHeadersProvider from a map.
+     */
+    private RateLimitHeaderParser.AllHeadersProvider createAllHeadersProvider(Map<String, String> headers) {
+        return new RateLimitHeaderParser.AllHeadersProvider() {
+            @Override
+            public Map<String, String> getAllHeaders() {
+                return headers;
+            }
+
+            @Override
+            public String getHeader(String headerName) {
+                // Case-insensitive lookup
+                for (Map.Entry<String, String> entry : headers.entrySet()) {
+                    if (entry.getKey().equalsIgnoreCase(headerName)) {
+                        return entry.getValue();
+                    }
+                }
+                return null;
+            }
         };
     }
 
@@ -1297,6 +1321,374 @@ class RateLimitHeaderParserTest {
             @SuppressWarnings("unchecked")
             Optional<Instant> result = (Optional<Instant>) method.invoke(parser, (String) null);
             assertTrue(result.isEmpty());
+        }
+    }
+
+    @Nested
+    @DisplayName("Multi-bucket header parsing tests")
+    class MultiBucketParsingTests {
+
+        @Test
+        @DisplayName("should parse multiple buckets from headers")
+        void shouldParseMultipleBuckets() {
+            Map<String, String> headers = Map.of(
+                "X-RateLimit-AppDay-Limit", "10000000",
+                "X-RateLimit-AppDay-Remaining", "9999999",
+                "X-RateLimit-AppDay-Reset", "1609459200",
+                "X-RateLimit-Session-Limit", "120",
+                "X-RateLimit-Session-Remaining", "75",
+                "X-RateLimit-Session-Reset", "1609459260"
+            );
+
+            var provider = createAllHeadersProvider(headers);
+            Map<String, RateLimitInfo> result = parser.parseAllBuckets(provider);
+
+            assertEquals(2, result.size());
+
+            // Check AppDay bucket
+            assertTrue(result.containsKey("AppDay"));
+            RateLimitInfo appDayInfo = result.get("AppDay");
+            assertEquals(10000000L, appDayInfo.limit());
+            assertEquals(9999999L, appDayInfo.remaining());
+            assertEquals(Instant.ofEpochSecond(1609459200L), appDayInfo.resetTime());
+
+            // Check Session bucket
+            assertTrue(result.containsKey("Session"));
+            RateLimitInfo sessionInfo = result.get("Session");
+            assertEquals(120L, sessionInfo.limit());
+            assertEquals(75L, sessionInfo.remaining());
+            assertEquals(Instant.ofEpochSecond(1609459260L), sessionInfo.resetTime());
+        }
+
+        @Test
+        @DisplayName("should handle case-insensitive bucket names")
+        void shouldHandleCaseInsensitiveBucketNames() {
+            // Headers with different case variations
+            Map<String, String> headers = Map.of(
+                "X-RateLimit-AppDay-Limit", "10000",
+                "x-ratelimit-appday-remaining", "9999",
+                "X-RATELIMIT-APPDAY-RESET", "1609459200"
+            );
+
+            var provider = createAllHeadersProvider(headers);
+            Map<String, RateLimitInfo> result = parser.parseAllBuckets(provider);
+
+            assertEquals(1, result.size());
+            assertTrue(result.containsKey("AppDay"));
+            RateLimitInfo info = result.get("AppDay");
+            assertEquals(10000L, info.limit());
+            assertEquals(9999L, info.remaining());
+        }
+
+        @Test
+        @DisplayName("should fall back to default bucket for single-bucket headers")
+        void shouldFallBackToDefaultBucket() {
+            Map<String, String> headers = Map.of(
+                "X-RateLimit-Limit", "5000",
+                "X-RateLimit-Remaining", "4999",
+                "X-RateLimit-Reset", "1609459200"
+            );
+
+            var provider = createAllHeadersProvider(headers);
+            Map<String, RateLimitInfo> result = parser.parseAllBuckets(provider);
+
+            assertEquals(1, result.size());
+            assertTrue(result.containsKey("default"));
+            RateLimitInfo info = result.get("default");
+            assertEquals(5000L, info.limit());
+            assertEquals(4999L, info.remaining());
+            assertEquals(Instant.ofEpochSecond(1609459200L), info.resetTime());
+        }
+
+        @Test
+        @DisplayName("should return empty map when no rate limit headers present")
+        void shouldReturnEmptyMapWhenNoHeaders() {
+            Map<String, String> headers = Map.of(
+                "Content-Type", "application/json",
+                "Authorization", "Bearer token"
+            );
+
+            var provider = createAllHeadersProvider(headers);
+            Map<String, RateLimitInfo> result = parser.parseAllBuckets(provider);
+
+            assertTrue(result.isEmpty());
+        }
+
+        @Test
+        @DisplayName("should skip buckets with invalid data")
+        void shouldSkipBucketsWithInvalidData() {
+            Map<String, String> headers = Map.of(
+                "X-RateLimit-Valid-Limit", "1000",
+                "X-RateLimit-Valid-Remaining", "999",
+                "X-RateLimit-Valid-Reset", "1609459200",
+                "X-RateLimit-Invalid-Limit", "not-a-number",
+                "X-RateLimit-Invalid-Remaining", "999",
+                "X-RateLimit-Invalid-Reset", "1609459200"
+            );
+
+            var provider = createAllHeadersProvider(headers);
+            Map<String, RateLimitInfo> result = parser.parseAllBuckets(provider);
+
+            assertEquals(1, result.size());
+            assertTrue(result.containsKey("Valid"));
+            assertFalse(result.containsKey("Invalid"));
+        }
+
+        @Test
+        @DisplayName("should handle bucket names with hyphens and underscores")
+        void shouldHandleBucketNamesWithSpecialChars() {
+            Map<String, String> headers = Map.of(
+                "X-RateLimit-App-Day-Limit", "10000",
+                "X-RateLimit-App-Day-Remaining", "9999",
+                "X-RateLimit-App-Day-Reset", "1609459200",
+                "X-RateLimit-User_Session-Limit", "100",
+                "X-RateLimit-User_Session-Remaining", "99",
+                "X-RateLimit-User_Session-Reset", "1609459260"
+            );
+
+            var provider = createAllHeadersProvider(headers);
+            Map<String, RateLimitInfo> result = parser.parseAllBuckets(provider);
+
+            assertEquals(2, result.size());
+            assertTrue(result.containsKey("App-Day"));
+            assertTrue(result.containsKey("User_Session"));
+        }
+
+        @Test
+        @DisplayName("should handle numeric bucket names")
+        void shouldHandleNumericBucketNames() {
+            Map<String, String> headers = Map.of(
+                "X-RateLimit-Bucket123-Limit", "1000",
+                "X-RateLimit-Bucket123-Remaining", "999",
+                "X-RateLimit-Bucket123-Reset", "1609459200"
+            );
+
+            var provider = createAllHeadersProvider(headers);
+            Map<String, RateLimitInfo> result = parser.parseAllBuckets(provider);
+
+            assertEquals(1, result.size());
+            assertTrue(result.containsKey("Bucket123"));
+        }
+
+        @Test
+        @DisplayName("should use simple HeaderValueProvider and fall back to legacy headers")
+        void shouldFallBackWithSimpleProvider() {
+            Map<String, String> headers = Map.of(
+                "X-RateLimit-Limit", "5000",
+                "X-RateLimit-Remaining", "4999",
+                "X-RateLimit-Reset", "1609459200"
+            );
+
+            // Use simple HeaderValueProvider (not AllHeadersProvider)
+            var provider = createProvider(headers);
+            Map<String, RateLimitInfo> result = parser.parseAllBuckets(provider);
+
+            assertEquals(1, result.size());
+            assertTrue(result.containsKey("default"));
+            RateLimitInfo info = result.get("default");
+            assertEquals(5000L, info.limit());
+        }
+
+        @Test
+        @DisplayName("should handle partial bucket data")
+        void shouldHandlePartialBucketData() {
+            Map<String, String> headers = Map.of(
+                "X-RateLimit-Partial-Limit", "1000",
+                // Missing Remaining header
+                "X-RateLimit-Partial-Reset", "1609459200"
+            );
+
+            var provider = createAllHeadersProvider(headers);
+            Map<String, RateLimitInfo> result = parser.parseAllBuckets(provider);
+
+            assertEquals(1, result.size());
+            assertTrue(result.containsKey("Partial"));
+            RateLimitInfo info = result.get("Partial");
+            assertEquals(1000L, info.limit());
+            assertEquals(0L, info.remaining()); // Default value for missing header
+        }
+
+        @Test
+        @DisplayName("should ignore headers that don't match pattern")
+        void shouldIgnoreNonMatchingHeaders() {
+            Map<String, String> headers = Map.of(
+                "X-RateLimit-App-Limit", "1000",
+                "X-RateLimit-App-Remaining", "999",
+                "X-RateLimit-App-Reset", "1609459200",
+                "X-RateLimit-Limit", "5000",
+                "RateLimit-Limit", "2000",
+                "Some-Other-Header", "value"
+            );
+
+            var provider = createAllHeadersProvider(headers);
+            Map<String, RateLimitInfo> result = parser.parseAllBuckets(provider);
+
+            assertEquals(1, result.size());
+            assertTrue(result.containsKey("App"));
+        }
+
+        @Test
+        @DisplayName("should maintain insertion order of buckets")
+        void shouldMaintainInsertionOrder() {
+            Map<String, String> headers = new java.util.LinkedHashMap<>();
+            headers.put("X-RateLimit-Zebra-Limit", "1000");
+            headers.put("X-RateLimit-Zebra-Remaining", "999");
+            headers.put("X-RateLimit-Zebra-Reset", "1609459200");
+            headers.put("X-RateLimit-Alpha-Limit", "2000");
+            headers.put("X-RateLimit-Alpha-Remaining", "1999");
+            headers.put("X-RateLimit-Alpha-Reset", "1609459260");
+
+            var provider = createAllHeadersProvider(headers);
+            Map<String, RateLimitInfo> result = parser.parseAllBuckets(provider);
+
+            assertEquals(2, result.size());
+            var keys = result.keySet().toArray(new String[0]);
+            assertEquals("Zebra", keys[0]);
+            assertEquals("Alpha", keys[1]);
+        }
+
+        @Test
+        @DisplayName("should handle mixed case in bucket pattern matching")
+        void shouldHandleMixedCaseInPatternMatching() {
+            Map<String, String> headers = Map.of(
+                "x-RateLiMiT-MiXeD-LiMiT", "1000",
+                "X-rAtElImIt-MiXeD-ReMaInInG", "999",
+                "X-RATELIMIT-MIXED-RESET", "1609459200"
+            );
+
+            var provider = createAllHeadersProvider(headers);
+            Map<String, RateLimitInfo> result = parser.parseAllBuckets(provider);
+
+            assertEquals(1, result.size());
+            // Should detect "MiXeD" bucket
+            assertTrue(result.containsKey("MiXeD"));
+        }
+
+        @Test
+        @DisplayName("should handle bucket with zero limit")
+        void shouldHandleBucketWithZeroLimit() {
+            Map<String, String> headers = Map.of(
+                "X-RateLimit-Zero-Limit", "0",
+                "X-RateLimit-Zero-Remaining", "0",
+                "X-RateLimit-Zero-Reset", "1609459200"
+            );
+
+            var provider = createAllHeadersProvider(headers);
+            Map<String, RateLimitInfo> result = parser.parseAllBuckets(provider);
+
+            // Bucket with zero limit should not be included (hasValidData() returns false)
+            assertTrue(result.isEmpty());
+        }
+
+        @Test
+        @DisplayName("should handle legacy headers with Retry-After")
+        void shouldHandleLegacyHeadersWithRetryAfter() {
+            Map<String, String> headers = Map.of(
+                "X-RateLimit-Limit", "5000",
+                "X-RateLimit-Remaining", "0",
+                "X-RateLimit-Reset", "1609459200",
+                "Retry-After", "120"
+            );
+
+            var provider = createAllHeadersProvider(headers);
+            Map<String, RateLimitInfo> result = parser.parseAllBuckets(provider);
+
+            assertEquals(1, result.size());
+            RateLimitInfo info = result.get("default");
+            assertNotNull(info);
+            assertEquals(0L, info.remaining());
+            // retryAfter should be calculated
+            assertTrue(info.retryAfter() >= 0);
+        }
+
+        @Test
+        @DisplayName("should normalize duplicate bucket names with different cases")
+        void shouldNormalizeDuplicateBucketNames() {
+            // Using LinkedHashMap to ensure order and test case-insensitive deduplication
+            Map<String, String> headers = new java.util.LinkedHashMap<>();
+            headers.put("X-RateLimit-AppDay-Limit", "10000");
+            headers.put("X-RateLimit-AppDay-Remaining", "9999");
+            headers.put("X-RateLimit-AppDay-Reset", "1609459200");
+            headers.put("X-RateLimit-APPDAY-Remaining", "8888"); // Different case, should use AppDay bucket
+            headers.put("X-RateLimit-Session-Limit", "100");
+            headers.put("X-RateLimit-Session-Remaining", "99");
+            headers.put("X-RateLimit-Session-Reset", "1609459260");
+
+            var provider = createAllHeadersProvider(headers);
+            Map<String, RateLimitInfo> result = parser.parseAllBuckets(provider);
+
+            // Should have two buckets (AppDay and Session)
+            assertEquals(2, result.size());
+            assertTrue(result.containsKey("AppDay"));
+            assertTrue(result.containsKey("Session"));
+
+            // AppDay should use first occurrence bucket name
+            RateLimitInfo appDayInfo = result.get("AppDay");
+            assertEquals(10000L, appDayInfo.limit());
+            // Remaining should come from case-insensitive lookup (9999 from AppDay-Remaining)
+            assertEquals(9999L, appDayInfo.remaining());
+        }
+
+        @Test
+        @DisplayName("should handle empty headers map")
+        void shouldHandleEmptyHeadersMap() {
+            Map<String, String> headers = Map.of();
+
+            var provider = createAllHeadersProvider(headers);
+            Map<String, RateLimitInfo> result = parser.parseAllBuckets(provider);
+
+            assertTrue(result.isEmpty());
+        }
+
+        @Test
+        @DisplayName("should handle bucket names with only numbers")
+        void shouldHandleBucketNamesWithOnlyNumbers() {
+            Map<String, String> headers = Map.of(
+                "X-RateLimit-123-Limit", "1000",
+                "X-RateLimit-123-Remaining", "999",
+                "X-RateLimit-123-Reset", "1609459200"
+            );
+
+            var provider = createAllHeadersProvider(headers);
+            Map<String, RateLimitInfo> result = parser.parseAllBuckets(provider);
+
+            assertEquals(1, result.size());
+            assertTrue(result.containsKey("123"));
+        }
+
+        @Test
+        @DisplayName("should handle bucket with malformed reset time")
+        void shouldHandleBucketWithMalformedResetTime() {
+            Map<String, String> headers = Map.of(
+                "X-RateLimit-Bad-Limit", "1000",
+                "X-RateLimit-Bad-Remaining", "999",
+                "X-RateLimit-Bad-Reset", "not-a-timestamp"
+            );
+
+            var provider = createAllHeadersProvider(headers);
+            Map<String, RateLimitInfo> result = parser.parseAllBuckets(provider);
+
+            assertEquals(1, result.size());
+            RateLimitInfo info = result.get("Bad");
+            assertNotNull(info);
+            assertEquals(Instant.EPOCH, info.resetTime()); // Default value
+        }
+
+        @Test
+        @DisplayName("should preserve bucket name casing from first occurrence")
+        void shouldPreserveBucketNameCasingFromFirstOccurrence() {
+            // Create headers with specific order
+            Map<String, String> headers = new java.util.LinkedHashMap<>();
+            headers.put("X-RateLimit-MyBucket-Limit", "1000");
+            headers.put("X-RateLimit-MYBUCKET-Remaining", "999");
+            headers.put("X-RateLimit-mybucket-Reset", "1609459200");
+
+            var provider = createAllHeadersProvider(headers);
+            Map<String, RateLimitInfo> result = parser.parseAllBuckets(provider);
+
+            assertEquals(1, result.size());
+            // Should preserve "MyBucket" from first occurrence
+            assertTrue(result.containsKey("MyBucket"));
         }
     }
 }

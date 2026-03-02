@@ -1,10 +1,19 @@
 package com.bavodaniels.ratelimit.parser;
 
+import com.bavodaniels.ratelimit.model.RateLimitInfo;
+
 import java.time.Instant;
 import java.time.ZonedDateTime;
 import java.time.format.DateTimeFormatter;
 import java.time.format.DateTimeParseException;
+import java.util.HashMap;
+import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
+import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 /**
  * Parser for rate limit headers from various API providers.
@@ -41,6 +50,15 @@ public class RateLimitHeaderParser {
     private static final String STRIPE_RATELIMIT_LIMIT = "Stripe-RateLimit-Limit";
     private static final String STRIPE_RATELIMIT_REMAINING = "Stripe-RateLimit-Remaining";
     private static final String STRIPE_RATELIMIT_RESET = "Stripe-RateLimit-Reset";
+
+    // Pattern for multi-bucket headers: X-RateLimit-{BucketName}-Limit
+    private static final Pattern BUCKET_LIMIT_PATTERN = Pattern.compile(
+        "^X-RateLimit-([A-Za-z0-9_-]+)-Limit$",
+        Pattern.CASE_INSENSITIVE
+    );
+
+    // Default bucket name for single-bucket (legacy) headers
+    private static final String DEFAULT_BUCKET = "default";
 
     /**
      * Parses the rate limit (maximum requests allowed) from headers.
@@ -162,6 +180,163 @@ public class RateLimitHeaderParser {
      */
     public Optional<Long> parseGitHubUsed(HeaderValueProvider headerValue) {
         return parsePositiveLong(headerValue, X_RATELIMIT_USED);
+    }
+
+    /**
+     * Parses all rate limit buckets from headers.
+     * <p>
+     * Supports multi-bucket headers with pattern: X-RateLimit-{BucketName}-Limit,
+     * X-RateLimit-{BucketName}-Remaining, X-RateLimit-{BucketName}-Reset.
+     * </p>
+     * <p>
+     * Also maintains backwards compatibility with single-bucket (legacy) headers:
+     * X-RateLimit-Limit, X-RateLimit-Remaining, X-RateLimit-Reset.
+     * These are mapped to the "default" bucket.
+     * </p>
+     * <p>
+     * Bucket names are normalized to lowercase for consistent lookup and storage.
+     * For example, "AppDay", "appday", and "APPDAY" are all normalized to "appday".
+     * </p>
+     *
+     * @param headerValueProvider function to retrieve header value by name (case-insensitive)
+     * @return Map of bucket names to RateLimitInfo (bucket names are lowercase).
+     *         Empty map if no rate limit headers found.
+     *         For single-bucket headers, returns a map with key "default".
+     * @since 1.1.0
+     */
+    public Map<String, RateLimitInfo> parseAllBuckets(HeaderValueProvider headerValueProvider) {
+        // First, try to detect multi-bucket headers
+        Set<String> bucketNames = detectBucketNames(headerValueProvider);
+
+        Map<String, RateLimitInfo> result = new LinkedHashMap<>();
+
+        if (!bucketNames.isEmpty()) {
+            // Parse multi-bucket headers
+            for (String bucketName : bucketNames) {
+                RateLimitInfo info = parseBucketInfo(headerValueProvider, bucketName);
+                if (info.hasValidData()) {
+                    result.put(bucketName, info);
+                }
+            }
+        } else {
+            // Fall back to single-bucket (legacy) headers
+            RateLimitInfo defaultInfo = parseLegacyHeaders(headerValueProvider);
+            if (defaultInfo.hasValidData()) {
+                result.put(DEFAULT_BUCKET, defaultInfo);
+            }
+        }
+
+        return result;
+    }
+
+    /**
+     * Detects all bucket names from headers by finding headers matching the pattern
+     * {@code X-RateLimit-{BucketName}-Limit}. Requires the provider to implement
+     * {@link AllHeadersProvider} for header enumeration; returns an empty set otherwise.
+     *
+     * @param headerValueProvider function to retrieve header values
+     * @return Set of bucket names found in headers (preserving case from first occurrence)
+     */
+    private Set<String> detectBucketNames(HeaderValueProvider headerValueProvider) {
+        Set<String> bucketNames = new LinkedHashSet<>();
+        Map<String, String> canonicalNames = new HashMap<>(); // Maps lowercase to original case
+
+        if (headerValueProvider instanceof AllHeadersProvider allHeadersProvider) {
+            for (String headerName : allHeadersProvider.getAllHeaders().keySet()) {
+                Matcher matcher = BUCKET_LIMIT_PATTERN.matcher(headerName);
+                if (matcher.matches()) {
+                    String bucketName = matcher.group(1);
+                    String lowerBucketName = bucketName.toLowerCase();
+
+                    // Use the first occurrence's casing
+                    if (!canonicalNames.containsKey(lowerBucketName)) {
+                        canonicalNames.put(lowerBucketName, bucketName);
+                        bucketNames.add(bucketName);
+                    }
+                }
+            }
+        }
+
+        return bucketNames;
+    }
+
+    /**
+     * Parses rate limit information for a specific bucket.
+     *
+     * @param headerValueProvider function to retrieve header values
+     * @param bucketName the bucket name
+     * @return RateLimitInfo for the bucket
+     */
+    private RateLimitInfo parseBucketInfo(HeaderValueProvider headerValueProvider, String bucketName) {
+        String limitHeader = "X-RateLimit-" + bucketName + "-Limit";
+        String remainingHeader = "X-RateLimit-" + bucketName + "-Remaining";
+        String resetHeader = "X-RateLimit-" + bucketName + "-Reset";
+
+        Optional<Long> limit = parsePositiveLong(headerValueProvider, limitHeader);
+        Optional<Long> remaining = parsePositiveLong(headerValueProvider, remainingHeader);
+        Optional<Instant> reset = parseUnixTimestamp(headerValueProvider, resetHeader);
+
+        long limitValue = limit.orElse(0L);
+        long remainingValue = remaining.orElse(0L);
+
+        // Ensure remaining doesn't exceed limit
+        if (remainingValue > limitValue) {
+            remainingValue = limitValue;
+        }
+
+        return RateLimitInfo.builder()
+            .limit(limitValue)
+            .remaining(remainingValue)
+            .resetTime(reset.orElse(Instant.EPOCH))
+            .retryAfter(0L)
+            .build();
+    }
+
+    /**
+     * Parses legacy single-bucket headers (X-RateLimit-Limit, etc.).
+     *
+     * @param headerValueProvider function to retrieve header values
+     * @return RateLimitInfo from legacy headers
+     */
+    private RateLimitInfo parseLegacyHeaders(HeaderValueProvider headerValueProvider) {
+        Optional<Long> limit = parseLimit(headerValueProvider);
+        Optional<Long> remaining = parseRemaining(headerValueProvider);
+        Optional<Instant> reset = parseReset(headerValueProvider);
+        Optional<Instant> retryAfter = parseRetryAfter(headerValueProvider);
+
+        long retryAfterSeconds = 0L;
+        Instant resetTime = Instant.EPOCH;
+
+        if (retryAfter.isPresent()) {
+            retryAfterSeconds = Math.max(0, retryAfter.get().getEpochSecond() - Instant.now().getEpochSecond());
+            // If Retry-After is present but Reset is not, use Retry-After as the reset time
+            if (!reset.isPresent()) {
+                resetTime = retryAfter.get();
+            } else {
+                resetTime = reset.get();
+            }
+        } else if (reset.isPresent()) {
+            resetTime = reset.get();
+            retryAfterSeconds = Math.max(0, reset.get().getEpochSecond() - Instant.now().getEpochSecond());
+        }
+
+        // Use explicit limit if provided, otherwise use remaining count or retryAfter as indicator
+        long limitValue = limit.orElse(0L);
+        long remainingValue = remaining.orElse(0L);
+
+        // If we have remaining=0 or retryAfter but no explicit limit, use a default limit of 1
+        // This ensures the rate limit state is considered valid (hasValidData() will return true)
+        // Only do this if we actually parsed a remaining or retry-after header
+        if (limitValue == 0 && ((remaining.isPresent() && remainingValue == 0) || retryAfterSeconds > 0)) {
+            limitValue = 1;
+        }
+
+        return RateLimitInfo.builder()
+            .limit(limitValue)
+            .remaining(remainingValue)
+            .resetTime(resetTime)
+            .retryAfter(retryAfterSeconds)
+            .build();
     }
 
     /**
@@ -296,5 +471,21 @@ public class RateLimitHeaderParser {
          * @return the header value, or null if not found
          */
         String getHeader(String headerName);
+    }
+
+    /**
+     * Extended interface for header value providers that can enumerate all headers.
+     * This is required for multi-bucket header detection in {@link #parseAllBuckets(HeaderValueProvider)}.
+     *
+     * @since 1.1.0
+     */
+    public interface AllHeadersProvider extends HeaderValueProvider {
+        /**
+         * Retrieves all headers as a map.
+         *
+         * @return Map of header names to values. Header names should be preserved as-is
+         *         (case-sensitive) to allow pattern matching.
+         */
+        Map<String, String> getAllHeaders();
     }
 }

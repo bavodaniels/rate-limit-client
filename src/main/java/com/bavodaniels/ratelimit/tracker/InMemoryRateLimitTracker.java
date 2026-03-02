@@ -5,7 +5,8 @@ import com.bavodaniels.ratelimit.model.RateLimitState;
 import com.bavodaniels.ratelimit.parser.RateLimitHeaderParser;
 import org.springframework.http.HttpHeaders;
 
-import java.time.Instant;
+import java.util.HashMap;
+import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 
 /**
@@ -27,28 +28,36 @@ public class InMemoryRateLimitTracker implements RateLimitTracker {
 
     @Override
     public void updateFromHeaders(String host, HttpHeaders headers) {
-        // Create a header value provider for the parser
-        RateLimitHeaderParser.HeaderValueProvider headerProvider = headers::getFirst;
+        Map<String, RateLimitInfo> buckets = parser.parseAllBuckets(toHeadersProvider(headers));
 
-        // Parse headers using the RateLimitHeaderParser
-        Long limit = parser.parseLimit(headerProvider).orElse(null);
-        Long remaining = parser.parseRemaining(headerProvider).orElse(null);
-        Instant resetInstant = parser.parseReset(headerProvider).orElse(null);
-        Instant retryAfterInstant = parser.parseRetryAfter(headerProvider).orElse(null);
-
-        if (limit == null && remaining == null && resetInstant == null && retryAfterInstant == null) {
-            // No rate limit headers present
+        // If no rate limit headers found, return without updating
+        if (buckets.isEmpty()) {
             return;
         }
 
-        long limitValue = limit != null ? limit : 100; // Default limit
-        long remainingValue = remaining != null ? remaining : limitValue;
-        Instant resetTime = resetInstant != null ? resetInstant : Instant.now().plusSeconds(60);
-        long retryAfterSeconds = calculateRetryAfterSeconds(retryAfterInstant, resetTime, remainingValue);
-
-        RateLimitInfo info = new RateLimitInfo(limitValue, remainingValue, resetTime, retryAfterSeconds);
+        // Update the state with all detected buckets
         RateLimitState state = getState(host);
-        state.updateRateLimitInfo(info);
+        state.updateRateLimitInfo(buckets);
+    }
+
+    private RateLimitHeaderParser.AllHeadersProvider toHeadersProvider(HttpHeaders headers) {
+        return new RateLimitHeaderParser.AllHeadersProvider() {
+            @Override
+            public String getHeader(String headerName) {
+                return headers.getFirst(headerName);
+            }
+
+            @Override
+            public Map<String, String> getAllHeaders() {
+                Map<String, String> allHeaders = new HashMap<>();
+                headers.forEach((name, values) -> {
+                    if (values != null && !values.isEmpty()) {
+                        allHeaders.put(name, values.get(0));
+                    }
+                });
+                return allHeaders;
+            }
+        };
     }
 
     @Override
@@ -59,21 +68,5 @@ public class InMemoryRateLimitTracker implements RateLimitTracker {
     @Override
     public void clearAll() {
         states.clear();
-    }
-
-    private long calculateRetryAfterSeconds(Instant retryAfterTime, Instant resetTime, long remaining) {
-        // If Retry-After time is present, calculate wait time in seconds
-        if (retryAfterTime != null) {
-            long waitSeconds = retryAfterTime.getEpochSecond() - Instant.now().getEpochSecond();
-            return Math.max(0, waitSeconds);
-        }
-
-        // If no requests remaining, calculate wait time until reset in seconds
-        if (remaining <= 0 && resetTime != null) {
-            long waitSeconds = resetTime.getEpochSecond() - Instant.now().getEpochSecond();
-            return Math.max(0, waitSeconds);
-        }
-
-        return 0;
     }
 }

@@ -157,17 +157,17 @@ class WebClientIntegrationTest {
     @Test
     void testReactiveExceptionHandling_RateLimitExceeded() {
         contextRunner
-                .withPropertyValues("rate-limit.max-wait-time-millis=500")
+                .withPropertyValues("rate-limit.max-wait-time-millis=100")
                 .run(context -> {
                     WebClient.Builder builder = context.getBean(WebClient.Builder.class);
                     RateLimitTracker tracker = context.getBean(RateLimitTracker.class);
 
                     String host = mockWebServer.getHostName() + ":" + mockWebServer.getPort();
 
-                    // Set rate limit requiring excessive wait (2 seconds)
+                    // Set rate limit requiring excessive wait (300ms exceeds 100ms threshold)
                     HttpHeaders headers = new HttpHeaders();
                     headers.set("X-RateLimit-Remaining", "0");
-                    headers.set("Retry-After", "2"); // 2 seconds - exceeds 500ms threshold
+                    headers.set("Retry-After", "300"); // 300ms - exceeds 100ms threshold
                     tracker.updateFromHeaders(host, headers);
 
                     WebClient client = builder.baseUrl(baseUrl).build();
