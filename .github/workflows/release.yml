@@ -7,6 +7,7 @@ on:
 
 permissions:
   contents: write  # Required for creating releases
+  id-token: write  # For OIDC token generation (optional, for enhanced security)
 
 jobs:
   build:
@@ -93,6 +94,41 @@ jobs:
           JAR_FILE=$(find build/libs -name "*.jar" -not -name "*-plain.jar" | head -n 1)
           echo "JAR_PATH=$JAR_FILE" >> $GITHUB_OUTPUT
           echo "JAR_NAME=$(basename $JAR_FILE)" >> $GITHUB_OUTPUT
+
+      - name: Publish to Maven Central
+        run: |
+          # Create publishing activity
+          RESPONSE=$(curl -s -X POST https://api.publishing.sonatype.com/api/v1/publisher/uploads \
+            -H "Content-Type: application/json" \
+            -u "${{ secrets.OSSRH_USERNAME }}:${{ secrets.OSSRH_PASSWORD }}" \
+            -d "{\"name\": \"rate-limit-client-${{ steps.version.outputs.VERSION }}\", \"description\": \"Release ${{ steps.version.outputs.VERSION }}\"}")
+
+          UPLOAD_ID=$(echo $RESPONSE | jq -r '.uploadId')
+          echo "Upload ID: $UPLOAD_ID"
+
+          # Build the distribution
+          ./gradlew build -x test
+
+          # Upload JAR, sources, and javadoc to Maven Central
+          JAR=$(find build/libs -name "*rate-limit-client*.jar" -not -name "*-plain.jar" | head -n 1)
+          SOURCES=$(find build/libs -name "*-sources.jar" | head -n 1)
+          JAVADOC=$(find build/libs -name "*-javadoc.jar" | head -n 1)
+
+          # Upload each artifact
+          for ARTIFACT in "$JAR" "$SOURCES" "$JAVADOC"; do
+            if [ -f "$ARTIFACT" ]; then
+              curl -X POST "https://api.publishing.sonatype.com/api/v1/publisher/uploads/$UPLOAD_ID" \
+                -H "Content-Type: application/octet-stream" \
+                -u "${{ secrets.OSSRH_USERNAME }}:${{ secrets.OSSRH_PASSWORD }}" \
+                --data-binary "@$ARTIFACT"
+            fi
+          done
+
+          # Publish the upload (auto-release)
+          curl -X POST "https://api.publishing.sonatype.com/api/v1/publisher/uploads/$UPLOAD_ID/publish" \
+            -H "Content-Type: application/json" \
+            -u "${{ secrets.OSSRH_USERNAME }}:${{ secrets.OSSRH_PASSWORD }}" \
+            -d "{\"publishingType\": \"AUTOMATIC\"}"
 
       - name: Create Release
         uses: softprops/action-gh-release@v1
