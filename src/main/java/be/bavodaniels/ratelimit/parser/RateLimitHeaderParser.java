@@ -30,7 +30,7 @@ import java.util.regex.Pattern;
  * {@code X-RateLimit-{BucketName}-Limit}, {@code X-RateLimit-{BucketName}-Remaining},
  * {@code X-RateLimit-{BucketName}-Reset}.</p>
  *
- * <p>Example multi-bucket headers:
+ * <p>Example multi-bucket headers:</p>
  * <pre>
  * X-RateLimit-AppDay-Limit: 10000000
  * X-RateLimit-AppDay-Remaining: 9999999
@@ -40,7 +40,6 @@ import java.util.regex.Pattern;
  * X-RateLimit-Session-Remaining: 75
  * X-RateLimit-Session-Reset: 1735689600
  * </pre>
- * </p>
  *
  * @since 1.0.0
  */

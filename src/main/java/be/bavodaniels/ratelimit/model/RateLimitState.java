@@ -17,18 +17,17 @@ import java.util.concurrent.locks.ReentrantReadWriteLock;
  * as well as single-bucket configurations for backwards compatibility.</p>
  *
  * <h2>Multi-Bucket Rate Limiting Behavior</h2>
- * <p>When multiple buckets are tracked:
+ * <p>When multiple buckets are tracked:</p>
  * <ul>
  *   <li>{@link #canMakeRequest(Instant)} returns true only if ALL buckets allow the request</li>
  *   <li>{@link #isLimitExceeded()} returns true if ANY bucket is exceeded</li>
  *   <li>{@link #getWaitTimeSeconds(Instant)} returns the MAXIMUM wait time across all buckets</li>
  *   <li>For backwards compatibility, {@link #getCurrentInfo()} returns the most restrictive bucket</li>
  * </ul>
- * </p>
  *
  * <p>This class is thread-safe through the use of a ReadWriteLock.</p>
  *
- * <p>Example usage with multi-bucket:
+ * <p>Example usage with multi-bucket:</p>
  * <pre>
  * RateLimitState state = tracker.getState("api.example.com");
  * if (state.isLimitExceeded()) {
@@ -38,7 +37,6 @@ import java.util.concurrent.locks.ReentrantReadWriteLock;
  * RateLimitInfo orders = state.getBucketInfo("SessionOrders");
  * System.out.println("Orders remaining: " + orders.remaining());
  * </pre>
- * </p>
  *
  * @since 1.0.0
  */
