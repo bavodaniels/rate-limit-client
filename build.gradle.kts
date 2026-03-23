@@ -7,10 +7,11 @@ plugins {
 }
 
 group = "be.bavodaniels"
-version = "1.1.0"
+version = "1.2.0"
 
 java {
     withSourcesJar()
+    withJavadocJar()
     sourceCompatibility = JavaVersion.VERSION_25
     targetCompatibility = JavaVersion.VERSION_25
 }
@@ -187,6 +188,33 @@ publishing {
     publications {
         create<MavenPublication>("mavenJava") {
             from(components["java"])
+
+            pom {
+                name.set("Rate Limit Client")
+                description.set("Intelligent client-side rate limiting for Spring Boot applications")
+                url.set("https://github.com/bavodaniels/rate-limit-client")
+
+                licenses {
+                    license {
+                        name.set("Apache License 2.0")
+                        url.set("https://opensource.org/licenses/Apache-2.0")
+                    }
+                }
+
+                developers {
+                    developer {
+                        id.set("bavodaniels")
+                        name.set("Bavo Daniels")
+                        email.set("bavo.daniels@gmail.com")
+                    }
+                }
+
+                scm {
+                    connection.set("scm:git:https://github.com/bavodaniels/rate-limit-client.git")
+                    developerConnection.set("scm:git:ssh://git@github.com/bavodaniels/rate-limit-client.git")
+                    url.set("https://github.com/bavodaniels/rate-limit-client")
+                }
+            }
         }
     }
 }
