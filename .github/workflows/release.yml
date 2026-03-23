@@ -91,7 +91,7 @@ jobs:
       - name: Find JAR file
         id: jar
         run: |
-          JAR_FILE=$(find build/libs -name "rate-limit-client*.jar" -not -name "*-plain.jar" -not -name "*-sources.jar" -not -name "*-javadoc.jar" | head -n 1)
+          JAR_FILE=$(find build/libs -name "rate-limit-client*-plain.jar" | head -n 1)
           echo "JAR_PATH=$JAR_FILE" >> $GITHUB_OUTPUT
           echo "JAR_NAME=$(basename $JAR_FILE)" >> $GITHUB_OUTPUT
 
@@ -105,8 +105,8 @@ jobs:
           # First, build the distribution
           ./gradlew build -x test
 
-          # Find artifacts
-          JAR=$(find build/libs -name "rate-limit-client*.jar" -not -name "*-plain.jar" -not -name "*-sources.jar" -not -name "*-javadoc.jar" | head -n 1)
+          # Find artifacts (plain.jar is the actual compiled JAR since bootJar is disabled)
+          JAR=$(find build/libs -name "rate-limit-client*-plain.jar" | head -n 1)
           SOURCES=$(find build/libs -name "*-sources.jar" | head -n 1)
           JAVADOC=$(find build/libs -name "*-javadoc.jar" | head -n 1)
 
