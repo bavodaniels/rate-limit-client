@@ -96,39 +96,97 @@ jobs:
           echo "JAR_NAME=$(basename $JAR_FILE)" >> $GITHUB_OUTPUT
 
       - name: Publish to Maven Central
+        env:
+          SONATYPE_USERNAME: ${{ secrets.OSSRH_USERNAME }}
+          SONATYPE_PASSWORD: ${{ secrets.OSSRH_PASSWORD }}
         run: |
-          # Create publishing activity
-          RESPONSE=$(curl -s -X POST https://api.publishing.sonatype.com/api/v1/publisher/uploads \
-            -H "Content-Type: application/json" \
-            -u "${{ secrets.OSSRH_USERNAME }}:${{ secrets.OSSRH_PASSWORD }}" \
-            -d "{\"name\": \"rate-limit-client-${{ steps.version.outputs.VERSION }}\", \"description\": \"Release ${{ steps.version.outputs.VERSION }}\"}")
+          set -e
 
-          UPLOAD_ID=$(echo $RESPONSE | jq -r '.uploadId')
-          echo "Upload ID: $UPLOAD_ID"
-
-          # Build the distribution
+          # First, build the distribution
           ./gradlew build -x test
 
-          # Upload JAR, sources, and javadoc to Maven Central
+          # Find artifacts
           JAR=$(find build/libs -name "*rate-limit-client*.jar" -not -name "*-plain.jar" | head -n 1)
           SOURCES=$(find build/libs -name "*-sources.jar" | head -n 1)
           JAVADOC=$(find build/libs -name "*-javadoc.jar" | head -n 1)
 
+          if [ -z "$JAR" ]; then
+            echo "ERROR: Could not find JAR file"
+            exit 1
+          fi
+
+          echo "JAR: $JAR"
+          echo "SOURCES: $SOURCES"
+          echo "JAVADOC: $JAVADOC"
+
+          # Create publishing activity
+          echo "Creating publishing activity..."
+          RESPONSE=$(curl -s -w "\n%{http_code}" -X POST https://api.publishing.sonatype.com/api/v1/publisher/uploads \
+            -H "Content-Type: application/json" \
+            -u "$SONATYPE_USERNAME:$SONATYPE_PASSWORD" \
+            -d "{\"name\": \"rate-limit-client-${{ steps.version.outputs.VERSION }}\", \"description\": \"Release ${{ steps.version.outputs.VERSION }}\"}")
+
+          HTTP_CODE=$(echo "$RESPONSE" | tail -n 1)
+          BODY=$(echo "$RESPONSE" | head -n -1)
+
+          echo "Response code: $HTTP_CODE"
+          echo "Response body: $BODY"
+
+          if [ "$HTTP_CODE" != "201" ]; then
+            echo "ERROR: Failed to create publishing activity (HTTP $HTTP_CODE)"
+            exit 1
+          fi
+
+          UPLOAD_ID=$(echo "$BODY" | jq -r '.uploadId')
+
+          if [ -z "$UPLOAD_ID" ] || [ "$UPLOAD_ID" = "null" ]; then
+            echo "ERROR: Could not extract uploadId from response"
+            exit 1
+          fi
+
+          echo "Upload ID: $UPLOAD_ID"
+
           # Upload each artifact
           for ARTIFACT in "$JAR" "$SOURCES" "$JAVADOC"; do
             if [ -f "$ARTIFACT" ]; then
-              curl -X POST "https://api.publishing.sonatype.com/api/v1/publisher/uploads/$UPLOAD_ID" \
+              FILENAME=$(basename "$ARTIFACT")
+              echo "Uploading $FILENAME..."
+
+              UPLOAD_RESPONSE=$(curl -s -w "\n%{http_code}" -X POST "https://api.publishing.sonatype.com/api/v1/publisher/uploads/$UPLOAD_ID" \
                 -H "Content-Type: application/octet-stream" \
-                -u "${{ secrets.OSSRH_USERNAME }}:${{ secrets.OSSRH_PASSWORD }}" \
-                --data-binary "@$ARTIFACT"
+                -u "$SONATYPE_USERNAME:$SONATYPE_PASSWORD" \
+                --data-binary "@$ARTIFACT")
+
+              UPLOAD_CODE=$(echo "$UPLOAD_RESPONSE" | tail -n 1)
+              echo "Upload response code: $UPLOAD_CODE"
+
+              if [ "$UPLOAD_CODE" != "204" ]; then
+                echo "ERROR: Failed to upload $FILENAME (HTTP $UPLOAD_CODE)"
+                echo "Response: $(echo "$UPLOAD_RESPONSE" | head -n -1)"
+                exit 1
+              fi
             fi
           done
 
           # Publish the upload (auto-release)
-          curl -X POST "https://api.publishing.sonatype.com/api/v1/publisher/uploads/$UPLOAD_ID/publish" \
+          echo "Publishing upload..."
+          PUBLISH_RESPONSE=$(curl -s -w "\n%{http_code}" -X POST "https://api.publishing.sonatype.com/api/v1/publisher/uploads/$UPLOAD_ID/publish" \
             -H "Content-Type: application/json" \
-            -u "${{ secrets.OSSRH_USERNAME }}:${{ secrets.OSSRH_PASSWORD }}" \
-            -d "{\"publishingType\": \"AUTOMATIC\"}"
+            -u "$SONATYPE_USERNAME:$SONATYPE_PASSWORD" \
+            -d "{\"publishingType\": \"AUTOMATIC\"}")
+
+          PUBLISH_CODE=$(echo "$PUBLISH_RESPONSE" | tail -n 1)
+          PUBLISH_BODY=$(echo "$PUBLISH_RESPONSE" | head -n -1)
+
+          echo "Publish response code: $PUBLISH_CODE"
+          echo "Publish response body: $PUBLISH_BODY"
+
+          if [ "$PUBLISH_CODE" != "200" ]; then
+            echo "ERROR: Failed to publish (HTTP $PUBLISH_CODE)"
+            exit 1
+          fi
+
+          echo "Successfully published to Maven Central!"
 
       - name: Create Release
         uses: softprops/action-gh-release@v1
