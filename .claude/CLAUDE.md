@@ -60,7 +60,7 @@ open build/reports/jacoco/test/html/index.html
 ```
 rate-limit-client/
 ├── src/
-│   ├── main/java/com/bavodaniels/ratelimit/
+│   ├── main/java/be/bavodaniels/ratelimit/
 │   │   ├── config/          # Auto-configuration classes
 │   │   ├── exception/       # Custom exceptions
 │   │   ├── filter/          # WebClient filters
@@ -160,15 +160,7 @@ Via `application.yml`:
 rate-limit:
   enabled: true
   max-wait-time-millis: 30000
-  clients:
-    rest-template:
-      enabled: true
-    rest-client:
-      enabled: true
-    web-client:
-      enabled: true
-    http-interface:
-      enabled: true
+  per-host: true
 ```
 
 ## Gradle Tips

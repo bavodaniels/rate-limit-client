@@ -1,20 +1,23 @@
 plugins {
     java
+    `maven-publish`
     id("org.springframework.boot") version "4.0.3"
     id("io.spring.dependency-management") version "1.1.7"
     jacoco
 }
 
-group = "com.bavodaniels"
-version = "1.0.0"
+group = "be.bavodaniels"
+version = "1.1.0"
 
 java {
+    withSourcesJar()
     sourceCompatibility = JavaVersion.VERSION_25
     targetCompatibility = JavaVersion.VERSION_25
 }
 
 repositories {
     mavenCentral()
+    mavenLocal()
 }
 
 dependencies {
@@ -178,4 +181,18 @@ tasks.test {
 
     // Optional: Also verify coverage after tests (uncomment to enable)
     // finalizedBy(tasks.jacocoTestCoverageVerification)
+}
+
+publishing {
+    publications {
+        create<MavenPublication>("mavenJava") {
+            from(components["java"])
+        }
+    }
+}
+
+tasks.named<org.gradle.api.publish.tasks.GenerateModuleMetadata>(
+    "generateMetadataFileForMavenJavaPublication"
+) {
+    suppressedValidationErrors.add("dependencies-without-versions")
 }

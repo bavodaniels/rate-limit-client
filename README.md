@@ -5,7 +5,7 @@
 [![Spring Boot](https://img.shields.io/badge/Spring%20Boot-4.0.3-brightgreen.svg)](https://spring.io/projects/spring-boot)
 ![Build Status](https://img.shields.io/badge/build-passing-brightgreen.svg)
 ![Coverage](https://img.shields.io/badge/coverage-100.0%25-brightgreen.svg)
-![Version](https://img.shields.io/badge/version-1.0.0-blue.svg)
+![Version](https://img.shields.io/badge/version-1.1.0-blue.svg)
 
 A Spring Boot auto-configuration library that provides intelligent, defensive client-side rate limiting for HTTP clients. Automatically tracks and respects rate limit headers from APIs to prevent overwhelming external services and avoid rate limit violations.
 
@@ -30,17 +30,17 @@ A Spring Boot auto-configuration library that provides intelligent, defensive cl
 
 ## Features
 
-- **Zero Configuration**: Auto-configures rate limiting for all Spring HTTP clients
-- **Multi-Client Support**: Works seamlessly with RestTemplate, RestClient, WebClient, and @HttpExchange interfaces
+- **Minimal Configuration**: Simple interceptor and filter classes you wire into your HTTP clients
+- **Multi-Client Support**: Provides interceptors and filters for RestTemplate, RestClient, WebClient, and @HttpExchange interfaces
 - **Multi-Bucket Support**: Tracks and respects multiple rate limit buckets (e.g., daily, hourly, per-resource limits)
 - **Industry-Standard Headers**: Supports X-RateLimit-*, RateLimit-*, Retry-After, and provider-specific formats (GitHub, Stripe)
 - **Intelligent Waiting**: Automatically waits for rate limits to reset within configurable thresholds
-- **Non-Blocking Reactive**: WebClient uses fully reactive, non-blocking delays
+- **Non-Blocking Reactive**: WebClient filter uses fully reactive, non-blocking delays
 - **Thread-Safe**: Built with concurrent data structures for safe multi-threaded usage
 - **Rich Exception Metadata**: Detailed RateLimitExceededException with retry timing information
 - **Defensive Design**: Protects external APIs from being overwhelmed by your application
-- **Spring Boot Integration**: Leverages Spring's auto-configuration and BeanPostProcessor patterns
-- **Flexible Configuration**: Per-client enable/disable controls and configurable wait thresholds
+- **Extensible**: Implement custom RateLimitTracker for distributed rate limiting (e.g., Redis-backed)
+- **Flexible Configuration**: Configurable wait thresholds and per-host rate limit tracking
 
 ## Installation
 
@@ -48,7 +48,7 @@ Add the dependency to your `build.gradle.kts`:
 
 ```kotlin
 dependencies {
-    implementation("com.bavodaniels:rate-limit-client:1.0.0-SNAPSHOT")
+    implementation("be.bavodaniels:rate-limit-client:1.1.0-SNAPSHOT")
 }
 ```
 
@@ -56,7 +56,7 @@ Or for `build.gradle`:
 
 ```groovy
 dependencies {
-    implementation 'com.bavodaniels:rate-limit-client:1.0.0-SNAPSHOT'
+    implementation 'be.bavodaniels:rate-limit-client:1.1.0-SNAPSHOT'
 }
 ```
 
@@ -64,9 +64,9 @@ For Maven users (`pom.xml`):
 
 ```xml
 <dependency>
-    <groupId>com.bavodaniels</groupId>
+    <groupId>be.bavodaniels</groupId>
     <artifactId>rate-limit-client</artifactId>
-    <version>1.0.0-SNAPSHOT</version>
+    <version>1.1.0-SNAPSHOT</version>
 </dependency>
 ```
 
@@ -74,44 +74,65 @@ For Maven users (`pom.xml`):
 
 1. **Add the dependency** (see [Installation](#installation))
 
-2. **Create an application.yml** with optional configuration:
+2. **Configure rate limiting properties** in `application.yml`:
 
 ```yaml
 rate-limit:
   enabled: true
-  max-wait-time-millis: 30000  # Maximum wait time before throwing exception
+  max-wait-time-millis: 5000  # Maximum wait time before throwing exception
 ```
 
-3. **Use any Spring HTTP client** - rate limiting is automatically enabled:
+3. **Wire the interceptor/filter into your HTTP client**:
 
+For **RestClient**:
 ```java
-@Service
-public class ApiService {
-
-    private final RestClient restClient;
-
-    public ApiService(RestClient.Builder restClientBuilder) {
-        this.restClient = restClientBuilder
+@Configuration
+public class ApiConfig {
+    @Bean
+    public RestClient apiRestClient(
+            RestClient.Builder builder,
+            RateLimitTracker tracker,
+            RateLimitProperties properties) {
+        return builder
             .baseUrl("https://api.example.com")
+            .requestInterceptor(
+                new RestTemplateRateLimitInterceptor(
+                    tracker,
+                    properties.getMaxWaitTimeMillis()
+                )
+            )
             .build();
-    }
-
-    public String fetchData() {
-        // Rate limiting is automatically applied!
-        return restClient.get()
-            .uri("/data")
-            .retrieve()
-            .body(String.class);
     }
 }
 ```
 
-That's it! The library automatically:
-- Intercepts all HTTP requests
-- Parses rate limit headers from responses
-- Tracks rate limits per host
-- Waits when rate limits are approached
-- Throws `RateLimitExceededException` when wait time exceeds threshold
+For **WebClient**:
+```java
+@Configuration
+public class WebClientConfig {
+    @Bean
+    public WebClient apiWebClient(
+            WebClient.Builder builder,
+            RateLimitTracker tracker,
+            RateLimitProperties properties) {
+        return builder
+            .baseUrl("https://api.example.com")
+            .filter(
+                new WebClientRateLimitFilter(
+                    tracker,
+                    properties.getMaxWaitTimeMillis()
+                )
+            )
+            .build();
+    }
+}
+```
+
+That's it! The library will:
+- Intercept HTTP requests and parse rate limit headers from responses
+- Track rate limits per host
+- Automatically wait when rate limits are approached
+- Throw `RateLimitExceededException` when wait time exceeds your configured threshold
 
 ## Configuration
 
@@ -122,34 +143,20 @@ rate-limit:
   # Global enable/disable (default: true)
   enabled: true
 
-  # Maximum wait time in milliseconds before throwing exception (default: 30000)
-  max-wait-time-millis: 30000
-
-  # Per-client configuration
-  clients:
-    rest-template:
-      enabled: true
-    rest-client:
-      enabled: true
-    web-client:
-      enabled: true
-    http-interface:
-      enabled: true
+  # Maximum wait time in milliseconds before throwing exception (default: 5000)
+  max-wait-time-millis: 5000
 ```
 
 ### Disabling Rate Limiting
 
+To disable rate limiting globally, set the property:
+
 ```yaml
-# Disable globally
 rate-limit:
   enabled: false
-
-# Or disable per client type
-rate-limit:
-  clients:
-    rest-template:
-      enabled: false
 ```
+
+To disable for a specific client, simply don't wire the interceptor/filter when creating the client.
 
 ### Security Note
 
@@ -159,18 +166,30 @@ This library provides **defensive client-side rate limiting** to prevent your ap
 
 ### RestTemplate
 
-RestTemplate beans are automatically configured with rate limiting via `BeanPostProcessor`:
+To use rate limiting with RestTemplate, manually add the interceptor:
 
 ```java
 @Configuration
 public class RestTemplateConfig {
 
     @Bean
-    public RestTemplate restTemplate(RestTemplateBuilder builder) {
-        // Rate limiting is automatically added to this bean
-        return builder
+    public RestTemplate restTemplate(
+            RestTemplateBuilder builder,
+            RateLimitTracker tracker,
+            RateLimitProperties properties) {
+        RestTemplate restTemplate = builder
             .rootUri("https://api.github.com")
             .build();
+
+        // Add the rate limit interceptor
+        restTemplate.getInterceptors().add(
+            new RestTemplateRateLimitInterceptor(
+                tracker,
+                properties.getMaxWaitTimeMillis()
+            )
+        );
+
+        return restTemplate;
     }
 }
 
@@ -198,18 +217,26 @@ public class GitHubService {
 
 ### RestClient
 
-RestClient.Builder is auto-configured with the rate limiting interceptor:
+Add the rate limiting interceptor when building your RestClient:
 
 ```java
 @Configuration
 public class ApiConfig {
 
     @Bean
-    public RestClient apiRestClient(RestClient.Builder builder) {
-        // Rate limiting interceptor is already configured
+    public RestClient apiRestClient(
+            RestClient.Builder builder,
+            RateLimitTracker tracker,
+            RateLimitProperties properties) {
         return builder
             .baseUrl("https://api.stripe.com")
             .defaultHeader("Authorization", "Bearer ${stripe.api.key}")
+            .requestInterceptor(
+                new RestTemplateRateLimitInterceptor(
+                    tracker,
+                    properties.getMaxWaitTimeMillis()
+                )
+            )
             .build();
     }
 }
@@ -236,18 +263,26 @@ public class StripeService {
 
 ### WebClient
 
-WebClient.Builder beans are customized with the rate limiting filter:
+Add the rate limiting filter when building your WebClient:
 
 ```java
 @Configuration
 public class WebClientConfig {
 
     @Bean
-    public WebClient apiWebClient(WebClient.Builder builder) {
-        // Rate limiting filter is automatically applied
+    public WebClient apiWebClient(
+            WebClient.Builder builder,
+            RateLimitTracker tracker,
+            RateLimitProperties properties) {
         return builder
             .baseUrl("https://api.twitter.com")
             .defaultHeader("Authorization", "Bearer ${twitter.api.key}")
+            .filter(
+                new WebClientRateLimitFilter(
+                    tracker,
+                    properties.getMaxWaitTimeMillis()
+                )
+            )
             .build();
     }
 }
@@ -278,7 +313,7 @@ public class TwitterService {
 
 ### @HttpExchange Interfaces
 
-Declarative HTTP interfaces work transparently with rate limiting when backed by any configured client:
+@HttpExchange interfaces work transparently with rate limiting when backed by a RestClient or WebClient with the interceptor/filter configured:
 
 ```java
 // Define your HTTP interface
@@ -303,9 +338,18 @@ public interface ApiClient {
 public class HttpInterfaceConfig {
 
     @Bean
-    public ApiClient apiClient(RestClient.Builder restClientBuilder) {
+    public ApiClient apiClient(
+            RestClient.Builder restClientBuilder,
+            RateLimitTracker tracker,
+            RateLimitProperties properties) {
         RestClient restClient = restClientBuilder
             .baseUrl("https://api.example.com")
+            .requestInterceptor(
+                new RestTemplateRateLimitInterceptor(
+                    tracker,
+                    properties.getMaxWaitTimeMillis()
+                )
+            )
             .build();
 
         HttpServiceProxyFactory factory = HttpServiceProxyFactory
@@ -327,13 +371,13 @@ public class UserService {
     }
 
     public User fetchUser(String id) {
-        // Rate limiting works transparently
+        // Rate limiting works transparently through the backing RestClient
         return apiClient.getUser(id);
     }
 }
 ```
 
-You can also back HTTP interfaces with RestTemplate or WebClient - rate limiting works with all of them.
+You can also back HTTP interfaces with WebClient - just add the `WebClientRateLimitFilter` to the builder.
 
 ## Supported Header Formats
 
@@ -427,7 +471,7 @@ All configuration properties with their defaults:
 
 ```yaml
 rate-limit:
-  # Global enable/disable
+  # Global enable/disable for auto-configuration
   # Type: boolean
   # Default: true
   enabled: true
@@ -435,56 +479,30 @@ rate-limit:
   # Maximum wait time in milliseconds before throwing RateLimitExceededException
   # If a request requires waiting longer than this threshold, an exception is thrown
   # Type: long (milliseconds)
-  # Default: 30000 (30 seconds)
-  max-wait-time-millis: 30000
+  # Default: 5000 (5 seconds)
+  max-wait-time-millis: 5000
 
-  # Per-client configuration
-  clients:
-    # RestTemplate-specific settings
-    rest-template:
-      # Enable/disable rate limiting for all RestTemplate beans
-      # Type: boolean
-      # Default: true
-      enabled: true
-
-    # RestClient-specific settings
-    rest-client:
-      # Enable/disable rate limiting for RestClient.Builder
-      # Type: boolean
-      # Default: true
-      enabled: true
-
-    # WebClient-specific settings
-    web-client:
-      # Enable/disable rate limiting for all WebClient.Builder beans
-      # Type: boolean
-      # Default: true
-      enabled: true
-
-    # HttpServiceProxyFactory-specific settings
-    http-interface:
-      # Enable/disable rate limiting for @HttpExchange interfaces
-      # Type: boolean
-      # Default: true
-      enabled: true
+  # Whether to track rate limits per host
+  # Type: boolean
+  # Default: true
+  per-host: true
 ```
 
 ## How It Works
 
 ### Architecture Overview
 
-The rate limiting implementation uses a multi-layered approach:
+The rate limiting implementation uses a straightforward, composable design:
 
 1. **Auto-Configuration Layer** (`RateLimitAutoConfiguration`)
-   - Conditionally enables based on classpath detection
-   - Registers BeanPostProcessors and customizers for each client type
-   - Provides default `InMemoryRateLimitTracker` bean
+   - Provides the default `InMemoryRateLimitTracker` bean
+   - Binds configuration properties from `application.yml`
+   - Can be globally disabled via `rate-limit.enabled=false`
 
-2. **Client Integration Layer**
-   - **RestTemplate**: BeanPostProcessor adds interceptor to all beans
-   - **RestClient**: Pre-configures Builder with interceptor
-   - **WebClient**: WebClientCustomizer adds reactive filter
-   - **@HttpExchange**: Transparently inherits from backing client
+2. **Interceptor/Filter Layer**
+   - **RestTemplate/RestClient**: `RestTemplateRateLimitInterceptor` - wired manually into clients
+   - **WebClient**: `WebClientRateLimitFilter` - wired manually into clients
+   - **@HttpExchange**: Works through the backing RestClient or WebClient
 
 3. **Tracking Layer** (`RateLimitTracker`)
    - Thread-safe in-memory storage of rate limit state per host
@@ -564,21 +582,16 @@ Please reduce request rate or implement exponential backoff.
 
 ### Common Issues
 
-**Q: Rate limiting isn't working for my RestTemplate**
+**Q: Rate limiting isn't working**
 
-A: Ensure your RestTemplate is defined as a Spring bean. The library uses `BeanPostProcessor` which only affects beans managed by Spring:
+A: Make sure you've wired the interceptor or filter into your HTTP client when building it:
 
 ```java
-// ✅ Good - managed by Spring
-@Bean
-public RestTemplate restTemplate() {
-    return new RestTemplate();
-}
+// ✅ Good - interceptor explicitly added
+restTemplate.getInterceptors().add(new RestTemplateRateLimitInterceptor(...));
 
-// ❌ Bad - not a bean
-public void someMethod() {
-    RestTemplate restTemplate = new RestTemplate(); // Won't have rate limiting
-}
+// ❌ Bad - interceptor not added
+RestTemplate restTemplate = new RestTemplate(); // No rate limiting
 ```
 
 **Q: I'm getting RateLimitExceededException immediately**
@@ -588,13 +601,12 @@ A: The API has already rate limited you. Check:
 2. Recent request patterns
 3. Consider increasing `max-wait-time-millis` if appropriate
 
-**Q: Rate limiting is too aggressive**
+**Q: Rate limiting seems too strict**
 
-A: The library respects the rate limits set by the API. If you need to bypass rate limiting temporarily:
-```yaml
-rate-limit:
-  enabled: false  # Disable globally, or per-client
-```
+A: The library respects the rate limits set by the API. If you need to adjust the behavior:
+- Increase `max-wait-time-millis` to allow longer waits
+- Disable rate limiting via `rate-limit.enabled: false` if needed
+- Or don't wire the interceptor/filter for specific clients you want to exclude
 
 **Q: WebClient isn't blocking when it should**
 
@@ -619,7 +631,7 @@ A: Enable debug logging:
 ```yaml
 logging:
   level:
-    com.bavodaniels.ratelimit: DEBUG
+    be.bavodaniels.ratelimit: DEBUG
 ```
 
 ### FAQ
