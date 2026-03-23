@@ -5,7 +5,7 @@
 [![Spring Boot](https://img.shields.io/badge/Spring%20Boot-4.0.3-brightgreen.svg)](https://spring.io/projects/spring-boot)
 ![Build Status](https://img.shields.io/badge/build-passing-brightgreen.svg)
 ![Coverage](https://img.shields.io/badge/coverage-100.0%25-brightgreen.svg)
-![Version](https://img.shields.io/badge/version-1.3.0-blue.svg)
+![Version](https://img.shields.io/badge/version-1.3.1-blue.svg)
 
 A Spring Boot auto-configuration library that provides intelligent, defensive client-side rate limiting for HTTP clients. Automatically tracks and respects rate limit headers from APIs to prevent overwhelming external services and avoid rate limit violations.
 
