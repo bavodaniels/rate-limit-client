@@ -121,10 +121,19 @@ jobs:
 
           # Create publishing activity
           echo "Creating publishing activity..."
-          RESPONSE=$(curl -s -w "\n%{http_code}" -X POST https://api.publishing.sonatype.com/api/v1/publisher/uploads \
+          set +e
+          RESPONSE=$(curl -v -w "\n%{http_code}" -X POST https://api.publishing.sonatype.com/api/v1/publisher/uploads \
             -H "Content-Type: application/json" \
             -u "$SONATYPE_USERNAME:$SONATYPE_PASSWORD" \
-            -d "{\"name\": \"rate-limit-client-${{ steps.version.outputs.VERSION }}\", \"description\": \"Release ${{ steps.version.outputs.VERSION }}\"}")
+            -d "{\"name\": \"rate-limit-client-${{ steps.version.outputs.VERSION }}\", \"description\": \"Release ${{ steps.version.outputs.VERSION }}\"}" 2>&1)
+          CURL_EXIT=$?
+          set -e
+
+          if [ $CURL_EXIT -ne 0 ]; then
+            echo "CURL failed with exit code: $CURL_EXIT"
+            echo "Full response: $RESPONSE"
+            exit 1
+          fi
 
           HTTP_CODE=$(echo "$RESPONSE" | tail -n 1)
           BODY=$(echo "$RESPONSE" | head -n -1)
